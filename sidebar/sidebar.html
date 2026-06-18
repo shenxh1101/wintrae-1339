@@ -86,6 +86,7 @@
         <div class="list-header">
           <div class="filter-tabs">
             <button class="filter-btn active" data-filter="all">全部</button>
+            <button class="filter-btn" data-filter="overview">🔥 今日总览</button>
             <button class="filter-btn" data-filter="overdue">🔴 已过期</button>
             <button class="filter-btn" data-filter="today">🟡 今天到期</button>
             <button class="filter-btn" data-filter="pending">待复习</button>
@@ -215,13 +216,17 @@
               </label>
             </div>
             <div class="export-format-group">
-              <label class="format-option"><input type="radio" name="exportFormat" value="markdown" checked /> 📄 Markdown (.md) + 截图文件夹</label>
+              <label class="format-option"><input type="radio" name="exportFormat" value="markdown" checked /> 📄 Markdown (.md) + 配套截图 PNG</label>
               <label class="format-option"><input type="radio" name="exportFormat" value="json" /> 💾 JSON (.json) 完整备份</label>
             </div>
           </div>
           <div class="export-actions">
             <button class="btn-primary" id="btnDoExport">⬇️ 生成资料包并下载</button>
             <p class="export-progress" id="exportProgress" style="display:none;"></p>
+            <p class="settings-hint" style="margin-top:10px;">
+              📂 <strong>Markdown 使用说明：</strong>下载的 .md 文件和所有 PNG 截图放在同一文件夹下即可正常预览图片，
+              文件名与文档中的引用一一对应。受浏览器限制文件将分别下载，您可以手动整理到同一目录。
+            </p>
           </div>
         </div>
 

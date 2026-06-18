@@ -436,6 +436,8 @@ const SidebarApp = {
   buildMarkdown(result) {
     let md = `# 网课学习笔记 - 导出\n\n`;
     md += `导出时间：${new Date().toLocaleString()}\n\n`;
+    md += `> 📂 **使用说明**：Markdown 文件与所有 PNG 截图下载后，请放在**同一文件夹**下即可正常预览所有图片，`;
+    md += `文档中的图片文件名与下载的 PNG 文件名一一对应。受浏览器安全限制，文件会分别下载，请手动整理到同一目录。\n\n`;
     md += `---\n\n`;
 
     for (const course of result.courses) {
@@ -474,7 +476,7 @@ const SidebarApp = {
             md += `#### 📷 截图\n\n`;
             for (const ss of chapterSss) {
               const safeTitle = (ss.title || 'screenshot').replace(/[^\w\u4e00-\u9fa5]/g, '_');
-              const filename = `screenshots/${safeTitle}-${ss.id}.png`;
+              const filename = `screenshot-${safeTitle}-${ss.id}.png`;
               md += `![${ss.title || '截图'} - ${this.formatTime(ss.timestamp)}](${filename})\n\n`;
               if (ss.description) md += `> ${ss.description}\n\n`;
             }
@@ -515,7 +517,8 @@ const SidebarApp = {
           if (imageData) {
             const blob = this.dataUrlToBlob(imageData);
             const safeTitle = (ss.title || 'screenshot').replace(/[^\w\u4e00-\u9fa5]/g, '_');
-            this.triggerDownload(blob, `screenshot-${safeTitle}-${ss.id}.png`);
+            const filename = `screenshot-${safeTitle}-${ss.id}.png`;
+            this.triggerDownload(blob, filename);
             downloaded++;
             progressEl.textContent = `正在下载截图 (${downloaded}/${ssCount})...`;
             await new Promise(r => setTimeout(r, 150));
@@ -527,9 +530,9 @@ const SidebarApp = {
     }
 
     this.triggerDownload(mdBlob, `study-notes-${courseLabel}-${timestamp}.md`);
-    progressEl.textContent = `✅ 导出成功！Markdown + ${ssCount} 张截图已下载`;
+    progressEl.textContent = `✅ 导出成功！Markdown + ${ssCount} 张截图已下载（请放同一文件夹）`;
     this.showToast(`Markdown + ${ssCount} 张截图已下载`);
-    setTimeout(() => progressEl.style.display = 'none', 5000);
+    setTimeout(() => progressEl.style.display = 'none', 6000);
   },
 
   renderCurrentTab() {
@@ -766,13 +769,18 @@ const SidebarApp = {
     const resp = await chrome.runtime.sendMessage({ action: 'getReviews', filter: {} });
     let reviews = resp?.data || [];
 
-    if (this.currentCourseId && this.reviewFilter === 'all') {
-      reviews = reviews.filter(r => r.courseId === this.currentCourseId);
-    }
-
-    const now = Date.now();
     const startOfToday = new Date(); startOfToday.setHours(0, 0, 0, 0);
     const endOfToday = new Date(); endOfToday.setHours(23, 59, 59, 999);
+
+    if (this.reviewFilter === 'overview') {
+      reviews = reviews.filter(r =>
+        r.status !== 'mastered' &&
+        r.nextReviewAt &&
+        r.nextReviewAt <= endOfToday.getTime()
+      );
+    } else if (this.currentCourseId && this.reviewFilter === 'all') {
+      reviews = reviews.filter(r => r.courseId === this.currentCourseId);
+    }
 
     const groups = {
       overdue: [],
@@ -794,7 +802,7 @@ const SidebarApp = {
     }
 
     let activeGroups;
-    if (this.reviewFilter === 'all') {
+    if (this.reviewFilter === 'all' || this.reviewFilter === 'overview') {
       activeGroups = ['overdue', 'today', 'pending', 'mastered'];
     } else if (this.reviewFilter === 'overdue') {
       activeGroups = ['overdue'];
@@ -815,11 +823,21 @@ const SidebarApp = {
 
     const hasAny = activeGroups.some(g => groups[g].length > 0);
     if (!hasAny) {
-      container.innerHTML = this.getEmptyState('🔁', '没有复习记录', '从笔记、书签、截图一键加入，或手动添加');
+      const hint = this.reviewFilter === 'overview'
+        ? '今天没有需要复习的内容 🎉'
+        : '从笔记、书签、截图一键加入，或手动添加';
+      container.innerHTML = this.getEmptyState('🔁', '没有复习记录', hint);
       return;
     }
 
     let html = '';
+    if (this.reviewFilter === 'overview') {
+      const total = groups.overdue.length + groups.today.length;
+      html += `<div style="padding:8px 12px;margin-bottom:8px;background:#fff7ed;border-radius:6px;border:1px solid #fed7aa;font-size:12px;color:#92400e;">
+        🔥 <strong>今日总览</strong>：共 ${total} 项需要复习（已过期 ${groups.overdue.length}，今天到期 ${groups.today.length}），覆盖所有课程
+      </div>`;
+    }
+
     for (const g of activeGroups) {
       const items = groups[g];
       if (items.length === 0) continue;
@@ -832,6 +850,7 @@ const SidebarApp = {
         const statusClass = overdue ? 'review-overdue' : (r.status === 'mastered' ? 'review-mastered' : 'review-pending');
         const statusText = overdue ? '已过期' : (r.status === 'mastered' ? '已掌握' : '待复习');
         const course = this.courses.find(c => c.id === r.courseId);
+        const isMastered = r.status === 'mastered';
 
         html += `
           <div class="list-item" data-id="${r.id}">
@@ -847,7 +866,8 @@ const SidebarApp = {
                 ${r.nextReviewAt ? `<span class="tag">⏰ ${new Date(r.nextReviewAt).toLocaleDateString()}</span>` : ''}
               </div>
               <div class="item-actions">
-                <button class="item-action" data-action="toggleStatus" title="切换状态">${r.status === 'mastered' ? '↩️' : '✅'}</button>
+                ${!isMastered ? `<button class="item-action" data-action="schedule" title="标记已复习并设置下次提醒">📅</button>` : ''}
+                <button class="item-action" data-action="toggleStatus" title="${isMastered ? '恢复为待复习' : '标记为已掌握'}">${isMastered ? '↩️' : '✅'}</button>
                 <button class="item-action" data-action="edit" title="编辑">✏️</button>
                 <button class="item-action" data-action="delete" title="删除">🗑️</button>
               </div>
@@ -869,6 +889,10 @@ const SidebarApp = {
       item.querySelector('[data-action="jump"]')?.addEventListener('click', async (e) => {
         e.stopPropagation();
         await this.jumpToTimestampForCourse(e.currentTarget.dataset.course, parseFloat(e.currentTarget.dataset.time));
+      });
+      item.querySelector('[data-action="schedule"]')?.addEventListener('click', (e) => {
+        e.stopPropagation();
+        this.showReviewSchedulerModal(id);
       });
       item.querySelector('[data-action="toggleStatus"]')?.addEventListener('click', async (e) => {
         e.stopPropagation();
@@ -899,6 +923,84 @@ const SidebarApp = {
         }
       });
     });
+  },
+
+  showReviewSchedulerModal(reviewId) {
+    this.showModal(`
+      <div class="modal-header">
+        <h3>📅 标记已复习</h3>
+        <button class="modal-close" data-close>×</button>
+      </div>
+      <div class="modal-body">
+        <p style="font-size:13px;color:#6b7280;margin-bottom:12px;">
+          选择下次复习的提醒时间：
+        </p>
+        <div style="display:flex;flex-direction:column;gap:8px;">
+          <label class="format-option" style="padding:10px 12px;">
+            <input type="radio" name="schedOption" value="1" /> ⏰ 明天再复习
+          </label>
+          <label class="format-option" style="padding:10px 12px;">
+            <input type="radio" name="schedOption" value="3" /> 🗓️ 3 天后再复习
+          </label>
+          <label class="format-option" style="padding:10px 12px;">
+            <input type="radio" name="schedOption" value="7" checked /> 📆 1 周后再复习
+          </label>
+          <label class="format-option" style="padding:10px 12px;">
+            <input type="radio" name="schedOption" value="custom" /> ✏️ 自定义日期
+          </label>
+        </div>
+        <div class="form-group" id="customDateGroup" style="margin-top:12px;display:none;">
+          <label>选择下次复习日期</label>
+          <input type="date" id="customReviewDate" />
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn-secondary" data-close style="margin:0;width:auto;padding:8px 16px;background:#f3f4f6;border:1px solid #e5e7eb;">取消</button>
+        <button class="btn-primary" id="confirmScheduleBtn">确认</button>
+      </div>
+    `);
+
+    const radios = document.querySelectorAll('input[name="schedOption"]');
+    const customGroup = document.getElementById('customDateGroup');
+    radios.forEach(r => {
+      r.addEventListener('change', () => {
+        customGroup.style.display = document.querySelector('input[name="schedOption"]:checked').value === 'custom' ? 'block' : 'none';
+      });
+    });
+
+    document.getElementById('confirmScheduleBtn').addEventListener('click', async () => {
+      const val = document.querySelector('input[name="schedOption"]:checked').value;
+      let nextDate;
+      if (val === 'custom') {
+        const dateVal = document.getElementById('customReviewDate').value;
+        if (!dateVal) {
+          this.showToast('请选择日期');
+          return;
+        }
+        nextDate = new Date(dateVal);
+      } else {
+        nextDate = new Date();
+        nextDate.setDate(nextDate.getDate() + parseInt(val));
+      }
+      nextDate.setHours(9, 0, 0, 0);
+
+      const resp = await chrome.runtime.sendMessage({ action: 'getReviews', filter: {} });
+      const review = resp?.data?.find(r => r.id === reviewId);
+      if (review) {
+        review.nextReviewAt = nextDate.getTime();
+        review.status = 'pending';
+        review.masteredAt = null;
+        review.lastReviewedAt = Date.now();
+        if (!review.reviewCount) review.reviewCount = 0;
+        review.reviewCount++;
+        await chrome.runtime.sendMessage({ action: 'saveReview', review });
+        this.closeModal();
+        this.renderReviews();
+        this.showToast(`已安排下次复习：${nextDate.toLocaleDateString()}`);
+      }
+    });
+
+    this.bindCloseEvents();
   },
 
   async jumpToTimestamp(timestamp) {

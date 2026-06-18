@@ -264,6 +264,13 @@ const StudyNoteContent = {
     if (this.floatWindow || !this.settings?.floatWindowVisible) return;
     if (document.getElementById('study-note-float-window')) return;
 
+    const shortcuts = (this.settings && this.settings.shortcuts) || {
+      quickNote: 'Ctrl+Shift+N',
+      quickBookmark: 'Ctrl+Shift+B',
+      quickScreenshot: 'Ctrl+Shift+S',
+      toggleSidebar: 'Ctrl+Shift+P'
+    };
+
     this.floatWindow = document.createElement('div');
     this.floatWindow.id = 'study-note-float-window';
     this.floatWindow.className = 'study-note-float-window';
@@ -273,19 +280,19 @@ const StudyNoteContent = {
         <button class="study-note-float-close" id="study-note-float-close" title="隐藏">×</button>
       </div>
       <div class="study-note-float-body">
-        <button class="study-note-float-btn" id="study-note-btn-note" title="快速笔记 (Ctrl+Shift+N)">
+        <button class="study-note-float-btn" id="study-note-btn-note" title="快速笔记 (${shortcuts.quickNote})">
           <span class="study-note-icon">📝</span>
           <span class="study-note-label">笔记</span>
         </button>
-        <button class="study-note-float-btn" id="study-note-btn-bookmark" title="添加书签 (Ctrl+Shift+B)">
+        <button class="study-note-float-btn" id="study-note-btn-bookmark" title="添加书签 (${shortcuts.quickBookmark})">
           <span class="study-note-icon">🔖</span>
           <span class="study-note-label">书签</span>
         </button>
-        <button class="study-note-float-btn" id="study-note-btn-screenshot" title="截图 (Ctrl+Shift+S)">
+        <button class="study-note-float-btn" id="study-note-btn-screenshot" title="截图 (${shortcuts.quickScreenshot})">
           <span class="study-note-icon">📷</span>
           <span class="study-note-label">截图</span>
         </button>
-        <button class="study-note-float-btn" id="study-note-btn-sidebar" title="打开侧边栏">
+        <button class="study-note-float-btn" id="study-note-btn-sidebar" title="打开侧边栏 (${shortcuts.toggleSidebar})">
           <span class="study-note-icon">📋</span>
           <span class="study-note-label">列表</span>
         </button>
