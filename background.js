@@ -127,6 +127,21 @@ async function handleMessage(msg, sender) {
       await chrome.tabs.create({ url: msg.url });
       return true;
 
+    case 'openSidebar':
+      try {
+        const targetTabId = msg.tabId || tabId;
+        if (targetTabId) {
+          await chrome.sidePanel.open({ tabId: targetTabId });
+        } else {
+          const [activeTab] = await chrome.tabs.query({ active: true, currentWindow: true });
+          if (activeTab?.id) await chrome.sidePanel.open({ tabId: activeTab.id });
+        }
+        return true;
+      } catch (e) {
+        console.error('Open sidebar failed:', e);
+        return false;
+      }
+
     default:
       throw new Error('Unknown action: ' + msg.action);
   }

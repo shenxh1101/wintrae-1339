@@ -4,13 +4,30 @@ const SidebarApp = {
   currentChapterId: null,
   activeTab: 'notes',
   reviewFilter: 'all',
+  currentSettings: null,
+
+  shortcutLabels: {
+    quickNote: '快速笔记',
+    quickBookmark: '添加书签',
+    quickScreenshot: '截取画面',
+    toggleSidebar: '切换侧边栏'
+  },
+
+  shortcutDefaults: {
+    quickNote: 'Ctrl+Shift+N',
+    quickBookmark: 'Ctrl+Shift+B',
+    quickScreenshot: 'Ctrl+Shift+S',
+    toggleSidebar: 'Ctrl+Shift+P'
+  },
 
   async init() {
     await this.loadCourses();
     this.setupTabs();
     this.setupEventListeners();
+    await this.loadSettings();
+    this.updateAllShortcutHints();
+    this.populateExportCourseSelect();
     this.renderCurrentTab();
-    this.loadSettings();
   },
 
   async loadCourses() {
@@ -96,11 +113,14 @@ const SidebarApp = {
 
     document.getElementById('btnSync').addEventListener('click', async () => {
       await this.loadCourses();
+      this.populateExportCourseSelect();
       this.renderCurrentTab();
       this.showToast('数据已刷新');
     });
 
     this.setupSettingsListeners();
+    this.setupShortcutListeners();
+    this.setupExportListeners();
   },
 
   setupSettingsListeners() {
@@ -109,10 +129,12 @@ const SidebarApp = {
         action: 'saveSettings',
         settings: { floatWindowVisible: e.target.checked }
       });
-      const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-      if (tab?.id) {
+      this.currentSettings.floatWindowVisible = e.target.checked;
+      const tabs = await chrome.tabs.query({});
+      for (const tab of tabs) {
         chrome.tabs.sendMessage(tab.id, { action: 'toggleFloatWindow', visible: e.target.checked }).catch(() => {});
       }
+      this.showToast(e.target.checked ? '浮动窗口已显示' : '浮动窗口已隐藏');
     });
 
     document.getElementById('settingAutoDetect').addEventListener('change', async (e) => {
@@ -120,37 +142,16 @@ const SidebarApp = {
         action: 'saveSettings',
         settings: { autoDetectVideo: e.target.checked }
       });
+      this.currentSettings.autoDetectVideo = e.target.checked;
     });
 
     document.getElementById('settingReminderDays').addEventListener('change', async (e) => {
+      const val = parseInt(e.target.value) || 7;
       await chrome.runtime.sendMessage({
         action: 'saveSettings',
-        settings: { reviewReminderDays: parseInt(e.target.value) || 7 }
+        settings: { reviewReminderDays: val }
       });
-    });
-
-    document.getElementById('btnExportAll').addEventListener('click', async () => {
-      try {
-        const { Storage } = window;
-        if (Storage) {
-          await Storage.exportAllData();
-          this.showToast('数据已导出');
-        }
-      } catch (e) {
-        this.showToast('导出失败: ' + e.message);
-      }
-    });
-
-    document.getElementById('btnExportNotes').addEventListener('click', async () => {
-      try {
-        const { Storage } = window;
-        if (Storage) {
-          await Storage.exportNotes(this.currentCourseId);
-          this.showToast('笔记已导出');
-        }
-      } catch (e) {
-        this.showToast('导出失败: ' + e.message);
-      }
+      this.currentSettings.reviewReminderDays = val;
     });
 
     document.getElementById('btnCleanCourses').addEventListener('click', async () => {
@@ -159,6 +160,7 @@ const SidebarApp = {
       if (resp?.data) {
         this.showToast(`已清理 ${resp.data.removed} 条无效记录`);
         await this.loadCourses();
+        this.populateExportCourseSelect();
       }
     });
 
@@ -169,6 +171,7 @@ const SidebarApp = {
         await chrome.storage.local.clear();
         this.showToast('所有数据已清空');
         await this.loadCourses();
+        this.populateExportCourseSelect();
         this.renderCurrentTab();
       } catch (e) {
         this.showToast('清空失败: ' + e.message);
@@ -176,12 +179,357 @@ const SidebarApp = {
     });
   },
 
+  setupShortcutListeners() {
+    document.getElementById('btnOpenShortcutsPage').addEventListener('click', () => {
+      chrome.tabs.create({ url: 'chrome://extensions/shortcuts' });
+    });
+
+    document.querySelectorAll('[data-action="editShortcut"]').forEach(btn => {
+      btn.addEventListener('click', () => {
+        this.showShortcutRecorder(btn.dataset.key);
+      });
+    });
+  },
+
+  setupExportListeners() {
+    document.getElementById('btnDoExport').addEventListener('click', () => this.doExport());
+  },
+
+  populateExportCourseSelect() {
+    const select = document.getElementById('exportCourseSelect');
+    if (!select) return;
+    select.innerHTML = '<option value="__all__">📚 全部课程</option>' +
+      this.courses.map(c => `<option value="${c.id}">${this.escapeHtml(c.title)}</option>`).join('');
+  },
+
   async loadSettings() {
     const resp = await chrome.runtime.sendMessage({ action: 'getSettings' });
-    const settings = resp?.data || {};
-    document.getElementById('settingFloatWindow').checked = settings.floatWindowVisible !== false;
-    document.getElementById('settingAutoDetect').checked = settings.autoDetectVideo !== false;
-    document.getElementById('settingReminderDays').value = settings.reviewReminderDays || 7;
+    this.currentSettings = resp?.data || {};
+    document.getElementById('settingFloatWindow').checked = this.currentSettings.floatWindowVisible !== false;
+    document.getElementById('settingAutoDetect').checked = this.currentSettings.autoDetectVideo !== false;
+    document.getElementById('settingReminderDays').value = this.currentSettings.reviewReminderDays || 7;
+    this.refreshShortcutBadges();
+  },
+
+  refreshShortcutBadges() {
+    const shortcuts = this.currentSettings.shortcuts || this.shortcutDefaults;
+    Object.keys(shortcuts).forEach(key => {
+      const badge = document.getElementById('shortcut-' + key);
+      if (badge) badge.textContent = shortcuts[key];
+    });
+  },
+
+  updateAllShortcutHints() {
+    const shortcuts = this.currentSettings?.shortcuts || this.shortcutDefaults;
+    document.querySelectorAll('[data-shortcut]').forEach(el => {
+      const key = el.dataset.shortcut;
+      if (shortcuts[key]) {
+        const label = this.shortcutLabels[key] || '';
+        el.textContent = `使用 ${shortcuts[key]} ${label ? label.replace('快速', '').replace('添加', '').replace('截取', '截取').trim() : '快速操作'}`;
+      }
+    });
+  },
+
+  showShortcutRecorder(key) {
+    const shortcuts = this.currentSettings?.shortcuts || { ...this.shortcutDefaults };
+    const current = shortcuts[key] || this.shortcutDefaults[key] || '';
+
+    this.showModal(`
+      <div class="modal-header">
+        <h3>⌨️ 设置快捷键 - ${this.shortcutLabels[key]}</h3>
+        <button class="modal-close" data-close>×</button>
+      </div>
+      <div class="modal-body">
+        <div class="shortcut-recorder">
+          <div class="shortcut-recorder-input" id="shortcutDisplay">${current}</div>
+          <p class="shortcut-recorder-hint">
+            ⚠️ 受浏览器安全策略限制，此处仅更新扩展内的提示文案。<br/>
+            若需要真正修改系统快捷键，请点击「打开浏览器设置」前往官方页面配置，<br/>
+            配置完成后再回来在此处录入相同的快捷键以保持提示一致。<br/><br/>
+            <strong>操作方式：</strong>在下方输入框中按下你想要的组合键即可捕获。
+          </p>
+          <div class="form-group">
+            <label>手动输入（可选，格式如 Ctrl+Shift+N）</label>
+            <input type="text" id="shortcutManual" placeholder="例如：Ctrl+Shift+N" value="${current}" />
+          </div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn-secondary" data-close style="margin:0;width:auto;padding:8px 16px;background:#f3f4f6;border:1px solid #e5e7eb;">取消</button>
+        <button class="btn-secondary" id="openBrowserSettings" style="margin:0;width:auto;padding:8px 16px;background:#dbeafe;color:#1e40af;border:1px solid #93c5fd;">🔗 打开浏览器设置</button>
+        <button class="btn-primary" id="saveShortcutBtn">保存提示</button>
+      </div>
+    `);
+
+    const displayEl = document.getElementById('shortcutDisplay');
+    const manualEl = document.getElementById('shortcutManual');
+    let capturedKeys = [];
+
+    const updateDisplay = () => {
+      if (capturedKeys.length > 0) {
+        displayEl.textContent = capturedKeys.join('+');
+        manualEl.value = capturedKeys.join('+');
+      }
+    };
+
+    const keydownHandler = (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      capturedKeys = [];
+      if (e.ctrlKey) capturedKeys.push('Ctrl');
+      if (e.altKey) capturedKeys.push('Alt');
+      if (e.shiftKey) capturedKeys.push('Shift');
+      if (e.metaKey) capturedKeys.push('Cmd');
+      const key = e.key;
+      if (key && !['Control', 'Alt', 'Shift', 'Meta'].includes(key)) {
+        capturedKeys.push(key.length === 1 ? key.toUpperCase() : key);
+      }
+      updateDisplay();
+    };
+
+    document.addEventListener('keydown', keydownHandler);
+
+    manualEl.addEventListener('input', (e) => {
+      displayEl.textContent = e.target.value || '未设置';
+    });
+
+    document.getElementById('openBrowserSettings').addEventListener('click', () => {
+      chrome.tabs.create({ url: 'chrome://extensions/shortcuts' });
+    });
+
+    document.getElementById('saveShortcutBtn').addEventListener('click', async () => {
+      const val = manualEl.value.trim();
+      if (!val) {
+        this.showToast('请输入或捕获快捷键');
+        return;
+      }
+      const newShortcuts = { ...(this.currentSettings.shortcuts || this.shortcutDefaults) };
+      newShortcuts[key] = val;
+      await chrome.runtime.sendMessage({
+        action: 'saveSettings',
+        settings: { shortcuts: newShortcuts }
+      });
+      this.currentSettings.shortcuts = newShortcuts;
+      this.refreshShortcutBadges();
+      this.updateAllShortcutHints();
+      this.closeModal();
+      this.showToast(`已更新：${this.shortcutLabels[key]} = ${val}`);
+      document.removeEventListener('keydown', keydownHandler);
+    });
+
+    this.bindCloseEvents();
+    const origClose = this.closeModal.bind(this);
+    this.closeModal = () => {
+      document.removeEventListener('keydown', keydownHandler);
+      this.closeModal = origClose;
+      origClose();
+    };
+  },
+
+  async doExport() {
+    const courseId = document.getElementById('exportCourseSelect').value;
+    const withNotes = document.getElementById('exportNotes').checked;
+    const withBookmarks = document.getElementById('exportBookmarks').checked;
+    const withScreenshots = document.getElementById('exportScreenshots').checked;
+    const withReviews = document.getElementById('exportReviews').checked;
+    const format = document.querySelector('input[name="exportFormat"]:checked').value;
+
+    if (!withNotes && !withBookmarks && !withScreenshots && !withReviews) {
+      this.showToast('请至少选择一项导出内容');
+      return;
+    }
+
+    const progressEl = document.getElementById('exportProgress');
+    progressEl.style.display = 'block';
+    progressEl.textContent = '正在准备资料包...';
+
+    try {
+      const targetCourses = courseId === '__all__'
+        ? this.courses
+        : this.courses.filter(c => c.id === courseId);
+
+      if (targetCourses.length === 0) {
+        throw new Error('未找到课程数据');
+      }
+
+      const result = { courses: [], exportedAt: new Date().toISOString() };
+      let ssCount = 0;
+
+      for (const course of targetCourses) {
+        const courseData = { ...course };
+
+        if (withNotes) {
+          const r = await chrome.runtime.sendMessage({ action: 'getNotes', filter: { courseId: course.id } });
+          courseData.notes = r?.data || [];
+        }
+        if (withBookmarks) {
+          const r = await chrome.runtime.sendMessage({ action: 'getBookmarks', filter: { courseId: course.id } });
+          courseData.bookmarks = r?.data || [];
+        }
+        if (withScreenshots) {
+          const r = await chrome.runtime.sendMessage({ action: 'getScreenshots', filter: { courseId: course.id } });
+          courseData.screenshots = r?.data || [];
+          ssCount += courseData.screenshots.length;
+        }
+        if (withReviews) {
+          const r = await chrome.runtime.sendMessage({ action: 'getReviews', filter: { courseId: course.id } });
+          courseData.reviews = r?.data || [];
+        }
+
+        result.courses.push(courseData);
+      }
+
+      progressEl.textContent = `已收集 ${targetCourses.length} 门课程数据，正在生成文件...`;
+
+      const timestamp = new Date().toISOString().slice(0, 10);
+      const courseLabel = courseId === '__all__' ? 'all-courses' : (targetCourses[0]?.title || 'course').replace(/[^\w\u4e00-\u9fa5]/g, '-');
+
+      if (format === 'json') {
+        const json = JSON.stringify(result, null, 2);
+        const blob = new Blob([json], { type: 'application/json' });
+        this.triggerDownload(blob, `study-notes-${courseLabel}-${timestamp}.json`);
+        progressEl.textContent = `✅ 导出成功！共 ${targetCourses.length} 门课程，${ssCount} 张截图`;
+        setTimeout(() => progressEl.style.display = 'none', 4000);
+        this.showToast('JSON 资料包已下载');
+      } else {
+        if (withScreenshots && ssCount > 0) {
+          progressEl.textContent = `正在处理 ${ssCount} 张截图...`;
+          await this.exportMarkdownWithScreenshots(result, courseLabel, timestamp, ssCount);
+        } else {
+          const md = this.buildMarkdown(result);
+          const blob = new Blob([md], { type: 'text/markdown' });
+          this.triggerDownload(blob, `study-notes-${courseLabel}-${timestamp}.md`);
+          progressEl.textContent = `✅ 导出成功！Markdown 文件已下载`;
+          setTimeout(() => progressEl.style.display = 'none', 4000);
+          this.showToast('Markdown 笔记已下载');
+        }
+      }
+    } catch (e) {
+      console.error(e);
+      progressEl.textContent = '❌ 导出失败：' + e.message;
+      this.showToast('导出失败: ' + e.message);
+      setTimeout(() => progressEl.style.display = 'none', 4000);
+    }
+  },
+
+  dataUrlToBlob(dataUrl) {
+    const parts = dataUrl.split(',');
+    const mime = parts[0].match(/:(.*?);/)[1];
+    const binary = atob(parts[1]);
+    const len = binary.length;
+    const bytes = new Uint8Array(len);
+    for (let i = 0; i < len; i++) bytes[i] = binary.charCodeAt(i);
+    return new Blob([bytes], { type: mime });
+  },
+
+  triggerDownload(blob, filename) {
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  },
+
+  buildMarkdown(result) {
+    let md = `# 网课学习笔记 - 导出\n\n`;
+    md += `导出时间：${new Date().toLocaleString()}\n\n`;
+    md += `---\n\n`;
+
+    for (const course of result.courses) {
+      md += `## 📚 ${course.title}\n\n`;
+      if (course.url) md += `课程链接：${course.url}\n\n`;
+
+      if (course.chapters && course.chapters.length > 0) {
+        for (const chapter of course.chapters) {
+          md += `### 📖 ${chapter.title}\n\n`;
+          const chapterNotes = (course.notes || []).filter(n => n.chapterId === chapter.id);
+          const chapterBms = (course.bookmarks || []).filter(b => b.chapterId === chapter.id);
+          const chapterSss = (course.screenshots || []).filter(s => s.chapterId === chapter.id);
+
+          if (chapterBms.length > 0) {
+            md += `#### 🔖 书签\n\n`;
+            for (const bm of chapterBms) {
+              md += `- **[${this.formatTime(bm.timestamp)}]** ${bm.title || '未命名书签'}`;
+              if (bm.tags && bm.tags.length) md += `  \`${bm.tags.join('` `')}\``;
+              md += '\n';
+              if (bm.description) md += `  > ${bm.description}\n`;
+            }
+            md += '\n';
+          }
+
+          if (chapterNotes.length > 0) {
+            md += `#### 📝 笔记\n\n`;
+            for (const note of chapterNotes) {
+              md += `- **[${this.formatTime(note.timestamp)}]** ${note.content}`;
+              if (note.tags && note.tags.length) md += `  \`${note.tags.join('` `')}\``;
+              md += '\n';
+            }
+            md += '\n';
+          }
+
+          if (chapterSss.length > 0) {
+            md += `#### 📷 截图\n\n`;
+            for (const ss of chapterSss) {
+              const safeTitle = (ss.title || 'screenshot').replace(/[^\w\u4e00-\u9fa5]/g, '_');
+              const filename = `screenshots/${safeTitle}-${ss.id}.png`;
+              md += `![${ss.title || '截图'} - ${this.formatTime(ss.timestamp)}](${filename})\n\n`;
+              if (ss.description) md += `> ${ss.description}\n\n`;
+            }
+          }
+        }
+      }
+
+      if (course.reviews && course.reviews.length > 0) {
+        md += `### 🔁 复习计划\n\n`;
+        for (const r of course.reviews) {
+          const status = r.status === 'mastered' ? '✅ 已掌握' : (r.status === 'pending' ? '⏳ 待复习' : r.status);
+          md += `- **${r.title}** - ${status}`;
+          if (r.nextReviewAt) md += `  下次复习：${new Date(r.nextReviewAt).toLocaleDateString()}`;
+          md += '\n';
+          if (r.description) md += `  > ${r.description}\n`;
+        }
+        md += '\n';
+      }
+
+      md += `---\n\n`;
+    }
+
+    return md;
+  },
+
+  async exportMarkdownWithScreenshots(result, courseLabel, timestamp, ssCount) {
+    const progressEl = document.getElementById('exportProgress');
+    const md = this.buildMarkdown(result);
+    const mdBlob = new Blob([md], { type: 'text/markdown' });
+
+    let downloaded = 0;
+    progressEl.textContent = `正在下载截图 (${downloaded}/${ssCount})...`;
+
+    for (const course of result.courses) {
+      for (const ss of course.screenshots || []) {
+        try {
+          const imageData = ss.annotatedData || ss.imageData;
+          if (imageData) {
+            const blob = this.dataUrlToBlob(imageData);
+            const safeTitle = (ss.title || 'screenshot').replace(/[^\w\u4e00-\u9fa5]/g, '_');
+            this.triggerDownload(blob, `screenshot-${safeTitle}-${ss.id}.png`);
+            downloaded++;
+            progressEl.textContent = `正在下载截图 (${downloaded}/${ssCount})...`;
+            await new Promise(r => setTimeout(r, 150));
+          }
+        } catch (e) {
+          console.warn('Screenshot download failed:', ss.id, e);
+        }
+      }
+    }
+
+    this.triggerDownload(mdBlob, `study-notes-${courseLabel}-${timestamp}.md`);
+    progressEl.textContent = `✅ 导出成功！Markdown + ${ssCount} 张截图已下载`;
+    this.showToast(`Markdown + ${ssCount} 张截图已下载`);
+    setTimeout(() => progressEl.style.display = 'none', 5000);
   },
 
   renderCurrentTab() {
@@ -214,7 +562,8 @@ const SidebarApp = {
     }
 
     if (notes.length === 0) {
-      container.innerHTML = this.getEmptyState('📝', '还没有笔记', '使用 Ctrl+Shift+N 快速记录');
+      const shortcut = this.currentSettings?.shortcuts?.quickNote || this.shortcutDefaults.quickNote;
+      container.innerHTML = this.getEmptyState('📝', '还没有笔记', `使用 ${shortcut} 快速记录`);
       return;
     }
 
@@ -222,7 +571,7 @@ const SidebarApp = {
       <div class="list-item" data-id="${note.id}">
         <div class="item-header">
           <span class="item-title">${this.escapeHtml(note.content?.substring(0, 50) || '无内容')}${note.content?.length > 50 ? '...' : ''}</span>
-          <span class="item-time" data-action="jump" data-time="${note.timestamp}">${this.formatTime(note.timestamp)}</span>
+          <span class="item-time" data-action="jump" data-time="${note.timestamp}" data-course="${note.courseId}">${this.formatTime(note.timestamp)}</span>
         </div>
         ${note.content?.length > 50 ? `<div class="item-content">${this.escapeHtml(note.content)}</div>` : ''}
         <div class="item-meta">
@@ -230,6 +579,7 @@ const SidebarApp = {
             ${(note.tags || []).map(t => `<span class="tag">${this.escapeHtml(t)}</span>`).join('')}
           </div>
           <div class="item-actions">
+            <button class="item-action" data-action="addReview" title="加入复习">🔁</button>
             <button class="item-action" data-action="edit" title="编辑">✏️</button>
             <button class="item-action" data-action="delete" title="删除">🗑️</button>
           </div>
@@ -245,7 +595,23 @@ const SidebarApp = {
       const id = item.dataset.id;
       item.querySelector('[data-action="jump"]')?.addEventListener('click', async (e) => {
         e.stopPropagation();
-        await this.jumpToTimestamp(parseFloat(e.currentTarget.dataset.time));
+        await this.jumpToTimestampForCourse(e.currentTarget.dataset.course, parseFloat(e.currentTarget.dataset.time));
+      });
+      item.querySelector('[data-action="addReview"]')?.addEventListener('click', async (e) => {
+        e.stopPropagation();
+        const resp = await chrome.runtime.sendMessage({ action: 'getNotes', filter: {} });
+        const note = resp?.data?.find(n => n.id === id);
+        if (note) {
+          this.showReviewModal({
+            courseId: note.courseId,
+            chapterId: note.chapterId,
+            title: note.content?.substring(0, 30) || '笔记复习',
+            description: note.content,
+            timestamp: note.timestamp,
+            sourceType: 'note',
+            sourceId: note.id
+          });
+        }
       });
       item.querySelector('[data-action="edit"]')?.addEventListener('click', (e) => {
         e.stopPropagation();
@@ -288,7 +654,8 @@ const SidebarApp = {
     }
 
     if (bookmarks.length === 0) {
-      container.innerHTML = this.getEmptyState('🔖', '还没有书签', '使用 Ctrl+Shift+B 快速添加');
+      const shortcut = this.currentSettings?.shortcuts?.quickBookmark || this.shortcutDefaults.quickBookmark;
+      container.innerHTML = this.getEmptyState('🔖', '还没有书签', `使用 ${shortcut} 快速添加`);
       return;
     }
 
@@ -296,7 +663,7 @@ const SidebarApp = {
       <div class="list-item" data-id="${bm.id}">
         <div class="item-header">
           <span class="item-title">${this.escapeHtml(bm.title || '未命名书签')}</span>
-          <span class="item-time" data-action="jump" data-time="${bm.timestamp}">${this.formatTime(bm.timestamp)}</span>
+          <span class="item-time" data-action="jump" data-time="${bm.timestamp}" data-course="${bm.courseId}">${this.formatTime(bm.timestamp)}</span>
         </div>
         ${bm.description ? `<div class="item-content">${this.escapeHtml(bm.description)}</div>` : ''}
         <div class="item-meta">
@@ -320,7 +687,7 @@ const SidebarApp = {
       const id = item.dataset.id;
       item.querySelector('[data-action="jump"]')?.addEventListener('click', async (e) => {
         e.stopPropagation();
-        await this.jumpToTimestamp(parseFloat(e.currentTarget.dataset.time));
+        await this.jumpToTimestampForCourse(e.currentTarget.dataset.course, parseFloat(e.currentTarget.dataset.time));
       });
       item.querySelector('[data-action="addReview"]')?.addEventListener('click', async (e) => {
         e.stopPropagation();
@@ -374,12 +741,13 @@ const SidebarApp = {
     }
 
     if (screenshots.length === 0) {
-      container.innerHTML = this.getEmptyState('📷', '还没有截图', '使用 Ctrl+Shift+S 截取画面');
+      const shortcut = this.currentSettings?.shortcuts?.quickScreenshot || this.shortcutDefaults.quickScreenshot;
+      container.innerHTML = this.getEmptyState('📷', '还没有截图', `使用 ${shortcut} 截取画面`);
       return;
     }
 
     container.innerHTML = screenshots.map(ss => `
-      <div class="screenshot-card" data-id="${ss.id}">
+      <div class="screenshot-card" data-id="${ss.id}" data-course="${ss.courseId}" data-time="${ss.timestamp}">
         <img class="screenshot-thumb" src="${ss.annotatedData || ss.imageData}" alt="${this.escapeHtml(ss.title || '')}" />
         <div class="screenshot-info">
           <div class="screenshot-title">${this.escapeHtml(ss.title || '未命名截图')}</div>
@@ -395,48 +763,103 @@ const SidebarApp = {
 
   async renderReviews() {
     const container = document.getElementById('reviewsList');
-    const filter = this.reviewFilter === 'all' ? {} : { status: this.reviewFilter };
-    if (this.currentCourseId && this.reviewFilter === 'all') {
-      filter.courseId = this.currentCourseId;
-    }
-    const resp = await chrome.runtime.sendMessage({ action: 'getReviews', filter });
-    const reviews = resp?.data || [];
+    const resp = await chrome.runtime.sendMessage({ action: 'getReviews', filter: {} });
+    let reviews = resp?.data || [];
 
-    if (reviews.length === 0) {
-      container.innerHTML = this.getEmptyState('🔁', '没有复习记录', '点击上方按钮添加复习计划');
-      return;
+    if (this.currentCourseId && this.reviewFilter === 'all') {
+      reviews = reviews.filter(r => r.courseId === this.currentCourseId);
     }
 
     const now = Date.now();
-    container.innerHTML = reviews.map(r => {
-      const overdue = r.nextReviewAt && r.nextReviewAt < now && r.status === 'pending';
-      const statusClass = overdue ? 'review-overdue' : (r.status === 'mastered' ? 'review-mastered' : 'review-pending');
-      const statusText = overdue ? '已过期' : (r.status === 'mastered' ? '已掌握' : '待复习');
-      const course = this.courses.find(c => c.id === r.courseId);
+    const startOfToday = new Date(); startOfToday.setHours(0, 0, 0, 0);
+    const endOfToday = new Date(); endOfToday.setHours(23, 59, 59, 999);
 
-      return `
-        <div class="list-item" data-id="${r.id}">
-          <div class="item-header">
-            <span class="item-title">${this.escapeHtml(r.title || '未命名复习项')}</span>
-            <span class="review-status ${statusClass}">${statusText}</span>
-          </div>
-          ${r.description ? `<div class="item-content">${this.escapeHtml(r.description)}</div>` : ''}
-          <div class="item-meta">
-            <div class="item-tags">
-              <span class="tag">${course ? this.escapeHtml(course.title) : '未知课程'}</span>
-              ${r.timestamp != null ? `<span class="tag" style="cursor:pointer" data-action="jump" data-time="${r.timestamp}">📍 ${this.formatTime(r.timestamp)}</span>` : ''}
-              ${r.nextReviewAt ? `<span class="tag">⏰ ${new Date(r.nextReviewAt).toLocaleDateString()}</span>` : ''}
-            </div>
-            <div class="item-actions">
-              <button class="item-action" data-action="toggleStatus" title="切换状态">${r.status === 'mastered' ? '↩️' : '✅'}</button>
-              <button class="item-action" data-action="edit" title="编辑">✏️</button>
-              <button class="item-action" data-action="delete" title="删除">🗑️</button>
-            </div>
-          </div>
-        </div>
-      `;
-    }).join('');
+    const groups = {
+      overdue: [],
+      today: [],
+      pending: [],
+      mastered: []
+    };
 
+    for (const r of reviews) {
+      if (r.status === 'mastered') {
+        groups.mastered.push(r);
+      } else if (r.nextReviewAt && r.nextReviewAt < startOfToday.getTime()) {
+        groups.overdue.push(r);
+      } else if (r.nextReviewAt && r.nextReviewAt >= startOfToday.getTime() && r.nextReviewAt <= endOfToday.getTime()) {
+        groups.today.push(r);
+      } else {
+        groups.pending.push(r);
+      }
+    }
+
+    let activeGroups;
+    if (this.reviewFilter === 'all') {
+      activeGroups = ['overdue', 'today', 'pending', 'mastered'];
+    } else if (this.reviewFilter === 'overdue') {
+      activeGroups = ['overdue'];
+    } else if (this.reviewFilter === 'today') {
+      activeGroups = ['today'];
+    } else if (this.reviewFilter === 'pending') {
+      activeGroups = ['pending'];
+    } else if (this.reviewFilter === 'mastered') {
+      activeGroups = ['mastered'];
+    }
+
+    const groupTitles = {
+      overdue: { label: '🔴 已过期', cls: 'review-group-overdue' },
+      today: { label: '🟡 今天到期', cls: 'review-group-today' },
+      pending: { label: '🔵 待复习', cls: 'review-group-pending' },
+      mastered: { label: '✅ 已掌握', cls: 'review-group-mastered' }
+    };
+
+    const hasAny = activeGroups.some(g => groups[g].length > 0);
+    if (!hasAny) {
+      container.innerHTML = this.getEmptyState('🔁', '没有复习记录', '从笔记、书签、截图一键加入，或手动添加');
+      return;
+    }
+
+    let html = '';
+    for (const g of activeGroups) {
+      const items = groups[g];
+      if (items.length === 0) continue;
+      const meta = groupTitles[g];
+      html += `<div class="review-group ${meta.cls}">`;
+      html += `<div class="review-group-title"><span>${meta.label}</span><span class="count-badge">${items.length}</span></div>`;
+
+      for (const r of items) {
+        const overdue = g === 'overdue';
+        const statusClass = overdue ? 'review-overdue' : (r.status === 'mastered' ? 'review-mastered' : 'review-pending');
+        const statusText = overdue ? '已过期' : (r.status === 'mastered' ? '已掌握' : '待复习');
+        const course = this.courses.find(c => c.id === r.courseId);
+
+        html += `
+          <div class="list-item" data-id="${r.id}">
+            <div class="item-header">
+              <span class="item-title">${this.escapeHtml(r.title || '未命名复习项')}</span>
+              <span class="review-status ${statusClass}">${statusText}</span>
+            </div>
+            ${r.description ? `<div class="item-content">${this.escapeHtml(r.description)}</div>` : ''}
+            <div class="item-meta">
+              <div class="item-tags">
+                <span class="tag">${course ? this.escapeHtml(course.title) : '未知课程'}</span>
+                ${r.timestamp != null ? `<span class="tag" style="cursor:pointer" data-action="jump" data-time="${r.timestamp}" data-course="${r.courseId}">📍 ${this.formatTime(r.timestamp)}</span>` : ''}
+                ${r.nextReviewAt ? `<span class="tag">⏰ ${new Date(r.nextReviewAt).toLocaleDateString()}</span>` : ''}
+              </div>
+              <div class="item-actions">
+                <button class="item-action" data-action="toggleStatus" title="切换状态">${r.status === 'mastered' ? '↩️' : '✅'}</button>
+                <button class="item-action" data-action="edit" title="编辑">✏️</button>
+                <button class="item-action" data-action="delete" title="删除">🗑️</button>
+              </div>
+            </div>
+          </div>
+        `;
+      }
+
+      html += `</div>`;
+    }
+
+    container.innerHTML = html;
     this.bindReviewEvents(container);
   },
 
@@ -445,7 +868,7 @@ const SidebarApp = {
       const id = item.dataset.id;
       item.querySelector('[data-action="jump"]')?.addEventListener('click', async (e) => {
         e.stopPropagation();
-        await this.jumpToTimestamp(parseFloat(e.currentTarget.dataset.time));
+        await this.jumpToTimestampForCourse(e.currentTarget.dataset.course, parseFloat(e.currentTarget.dataset.time));
       });
       item.querySelector('[data-action="toggleStatus"]')?.addEventListener('click', async (e) => {
         e.stopPropagation();
@@ -460,6 +883,7 @@ const SidebarApp = {
           }
           await chrome.runtime.sendMessage({ action: 'saveReview', review });
           this.renderReviews();
+          this.showToast(review.status === 'mastered' ? '已标记为已掌握' : '已恢复为待复习');
         }
       });
       item.querySelector('[data-action="edit"]')?.addEventListener('click', (e) => {
@@ -478,21 +902,32 @@ const SidebarApp = {
   },
 
   async jumpToTimestamp(timestamp) {
-    const course = this.courses.find(c => c.id === this.currentCourseId);
-    if (course?.url) {
-      const tabs = await chrome.tabs.query({ url: course.url.split('#')[0].split('?')[0] + '*' });
+    await this.jumpToTimestampForCourse(this.currentCourseId, timestamp);
+  },
+
+  async jumpToTimestampForCourse(courseId, timestamp) {
+    const course = this.courses.find(c => c.id === courseId);
+    if (!course?.url) {
+      this.showToast('无法跳转到视频位置：课程 URL 缺失');
+      return;
+    }
+    try {
+      const baseUrl = course.url.split('#')[0].split('?')[0];
+      const tabs = await chrome.tabs.query({ url: baseUrl + '*' });
       let targetTab = tabs.find(t => t.url === course.url) || tabs[0];
 
       if (!targetTab) {
         targetTab = await chrome.tabs.create({ url: course.url });
-        await new Promise(r => setTimeout(r, 2000));
+        await new Promise(r => setTimeout(r, 2500));
       } else {
         await chrome.tabs.update(targetTab.id, { active: true });
+        await chrome.windows.update(targetTab.windowId, { focused: true });
       }
 
       await chrome.tabs.sendMessage(targetTab.id, { action: 'jumpToTimestamp', timestamp }).catch(() => {});
-    } else {
-      this.showToast('无法跳转到视频位置');
+      this.showToast(`已跳转到 ${this.formatTime(timestamp)}`);
+    } catch (e) {
+      this.showToast('跳转失败: ' + e.message);
     }
   },
 
@@ -535,6 +970,7 @@ const SidebarApp = {
       this.currentChapterId = this.courses[this.courses.length - 1]?.chapters?.[0]?.id;
       this.renderCourseSelect();
       this.renderChapterSelect();
+      this.populateExportCourseSelect();
       this.renderCurrentTab();
       this.showToast('课程已创建');
     });
@@ -687,69 +1123,66 @@ const SidebarApp = {
   },
 
   showReviewModal(prefill = {}) {
-    const settingsResp = chrome.runtime.sendMessage({ action: 'getSettings' });
-    settingsResp.then(settingsData => {
-      const days = settingsData?.data?.reviewReminderDays || 7;
-      const defaultDate = new Date(Date.now() + days * 24 * 60 * 60 * 1000);
-      const dateStr = defaultDate.toISOString().split('T')[0];
+    const days = this.currentSettings?.reviewReminderDays || 7;
+    const defaultDate = new Date(Date.now() + days * 24 * 60 * 60 * 1000);
+    const dateStr = defaultDate.toISOString().split('T')[0];
 
-      this.showModal(`
-        <div class="modal-header">
-          <h3>🔁 添加复习计划</h3>
-          <button class="modal-close" data-close>×</button>
+    this.showModal(`
+      <div class="modal-header">
+        <h3>🔁 添加复习计划</h3>
+        <button class="modal-close" data-close>×</button>
+      </div>
+      <div class="modal-body">
+        <div class="form-group">
+          <label>标题</label>
+          <input type="text" id="reviewTitle" value="${this.escapeHtml(prefill.title || '')}" placeholder="复习内容标题" />
         </div>
-        <div class="modal-body">
-          <div class="form-group">
-            <label>标题</label>
-            <input type="text" id="reviewTitle" value="${this.escapeHtml(prefill.title || '')}" placeholder="复习内容标题" />
-          </div>
-          <div class="form-group">
-            <label>描述</label>
-            <textarea id="reviewDesc" rows="3" placeholder="复习要点...">${this.escapeHtml(prefill.description || '')}</textarea>
-          </div>
-          <div class="form-group">
-            <label>下次复习日期</label>
-            <input type="date" id="reviewDate" value="${dateStr}" />
-          </div>
-          <div class="form-group">
-            <label>状态</label>
-            <select id="reviewStatus">
-              <option value="pending">待复习</option>
-              <option value="mastered">已掌握</option>
-            </select>
-          </div>
+        <div class="form-group">
+          <label>描述</label>
+          <textarea id="reviewDesc" rows="3" placeholder="复习要点...">${this.escapeHtml(prefill.description || '')}</textarea>
         </div>
-        <div class="modal-footer">
-          <button class="btn-secondary" data-close style="margin:0;width:auto;padding:8px 16px;background:#f3f4f6;border:1px solid #e5e7eb;">取消</button>
-          <button class="btn-primary" id="saveReviewBtn">保存</button>
+        <div class="form-group">
+          <label>下次复习日期</label>
+          <input type="date" id="reviewDate" value="${dateStr}" />
         </div>
-      `);
+        <div class="form-group">
+          <label>状态</label>
+          <select id="reviewStatus">
+            <option value="pending">待复习</option>
+            <option value="mastered">已掌握</option>
+          </select>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn-secondary" data-close style="margin:0;width:auto;padding:8px 16px;background:#f3f4f6;border:1px solid #e5e7eb;">取消</button>
+        <button class="btn-primary" id="saveReviewBtn">保存</button>
+      </div>
+    `);
 
-      document.getElementById('saveReviewBtn').addEventListener('click', async () => {
-        const title = document.getElementById('reviewTitle').value.trim();
-        if (!title) {
-          this.showToast('请输入标题');
-          return;
-        }
-        const review = {
-          courseId: prefill.courseId || this.currentCourseId,
-          chapterId: prefill.chapterId || this.currentChapterId,
-          title,
-          description: document.getElementById('reviewDesc').value.trim(),
-          timestamp: prefill.timestamp,
-          status: document.getElementById('reviewStatus').value,
-          nextReviewAt: new Date(document.getElementById('reviewDate').value).getTime(),
-          sourceType: prefill.sourceType,
-          sourceId: prefill.sourceId
-        };
-        await chrome.runtime.sendMessage({ action: 'saveReview', review });
-        this.closeModal();
-        this.renderReviews();
-        this.showToast('已添加');
-      });
-
-      this.bindCloseEvents();
+    document.getElementById('saveReviewBtn').addEventListener('click', async () => {
+      const title = document.getElementById('reviewTitle').value.trim();
+      if (!title) {
+        this.showToast('请输入标题');
+        return;
+      }
+      const review = {
+        courseId: prefill.courseId || this.currentCourseId,
+        chapterId: prefill.chapterId || this.currentChapterId,
+        title,
+        description: document.getElementById('reviewDesc').value.trim(),
+        timestamp: prefill.timestamp,
+        status: document.getElementById('reviewStatus').value,
+        nextReviewAt: new Date(document.getElementById('reviewDate').value).getTime(),
+        sourceType: prefill.sourceType,
+        sourceId: prefill.sourceId
+      };
+      await chrome.runtime.sendMessage({ action: 'saveReview', review });
+      this.closeModal();
+      this.renderReviews();
+      this.showToast('已加入复习计划');
     });
+
+    this.bindCloseEvents();
   },
 
   async showReviewEditModal(reviewId) {
@@ -827,16 +1260,36 @@ const SidebarApp = {
           <label>描述</label>
           <textarea id="ssDesc" rows="2">${this.escapeHtml(ss.description || '')}</textarea>
         </div>
-        <p style="font-size:12px;color:#6b7280;">⏱️ 时间点：${this.formatTime(ss.timestamp)}</p>
+        <p style="font-size:12px;color:#6b7280;">
+          ⏱️ 时间点：<span style="cursor:pointer;color:#4f46e5;text-decoration:underline" id="ssJump">${this.formatTime(ss.timestamp)}</span>
+        </p>
       </div>
       <div class="modal-footer">
         <button class="btn-secondary" data-close style="margin:0;width:auto;padding:8px 16px;background:#f3f4f6;border:1px solid #e5e7eb;">关闭</button>
+        <button class="btn-secondary" id="reviewSsBtn" style="margin:0;width:auto;padding:8px 16px;background:#dbeafe;color:#1e40af;border:1px solid #93c5fd;">🔁 加入复习</button>
         <button class="btn-danger-outline" id="deleteSsBtn" style="margin:0;width:auto;padding:8px 16px;background:white;color:#ef4444;border:1px solid #fecaca;">删除</button>
         <button class="btn-primary" id="saveSsBtn">保存</button>
       </div>
     `);
 
     document.querySelector('.modal').classList.add('screenshot-preview-modal');
+
+    document.getElementById('ssJump').addEventListener('click', async () => {
+      await this.jumpToTimestampForCourse(ss.courseId, ss.timestamp);
+    });
+
+    document.getElementById('reviewSsBtn').addEventListener('click', () => {
+      this.closeModal();
+      this.showReviewModal({
+        courseId: ss.courseId,
+        chapterId: ss.chapterId,
+        title: ss.title || '截图复习',
+        description: ss.description,
+        timestamp: ss.timestamp,
+        sourceType: 'screenshot',
+        sourceId: ss.id
+      });
+    });
 
     document.getElementById('saveSsBtn').addEventListener('click', async () => {
       ss.title = document.getElementById('ssTitle').value.trim() || '未命名截图';
@@ -920,7 +1373,7 @@ const SidebarApp = {
     toast.textContent = message;
     toast.classList.add('show');
     clearTimeout(toast._timer);
-    toast._timer = setTimeout(() => toast.classList.remove('show'), 2000);
+    toast._timer = setTimeout(() => toast.classList.remove('show'), 2200);
   }
 };
 

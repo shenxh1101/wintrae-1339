@@ -761,3 +761,214 @@ body {
 .toast.show {
   opacity: 1;
 }
+
+.shortcut-list-wrapper {
+  margin-bottom: 12px;
+}
+
+.shortcut-item {
+  border-bottom: 1px solid #f3f4f6;
+}
+
+.shortcut-item:last-child {
+  border-bottom: none;
+}
+
+.shortcut-controls {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.shortcut-edit-btn {
+  background: #f3f4f6;
+  border: 1px solid #e5e7eb;
+  border-radius: 6px;
+  padding: 4px 8px;
+  font-size: 13px;
+  cursor: pointer;
+  transition: all 0.2s;
+  line-height: 1;
+}
+
+.shortcut-edit-btn:hover {
+  background: #e5e7eb;
+}
+
+.shortcut-footer {
+  padding-top: 8px;
+}
+
+.shortcut-footer .btn-secondary {
+  width: 100%;
+  margin-bottom: 8px;
+  padding: 8px 16px;
+}
+
+.shortcut-recorder {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.shortcut-recorder-input {
+  padding: 16px;
+  border: 2px dashed #c7d2fe;
+  border-radius: 8px;
+  text-align: center;
+  background: #eef2ff;
+  font-size: 18px;
+  font-weight: 600;
+  color: #4f46e5;
+  font-family: monospace;
+  letter-spacing: 1px;
+  min-height: 60px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.shortcut-recorder-hint {
+  font-size: 12px;
+  color: #6b7280;
+  text-align: center;
+  line-height: 1.6;
+}
+
+.export-options {
+  margin-bottom: 16px;
+}
+
+.export-checkboxes {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  padding: 12px 0;
+}
+
+.checkbox-label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  color: #374151;
+  cursor: pointer;
+}
+
+.checkbox-label input {
+  cursor: pointer;
+}
+
+.export-format-group {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px 0;
+}
+
+.format-option {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: #374151;
+  padding: 8px 12px;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.format-option:hover {
+  background: #f9fafb;
+}
+
+.format-option input {
+  cursor: pointer;
+}
+
+.format-option:has(input:checked) {
+  background: #eef2ff;
+  border-color: #c7d2fe;
+  color: #4f46e5;
+}
+
+.export-actions {
+  padding-top: 8px;
+}
+
+.export-actions .btn-primary {
+  width: 100%;
+  padding: 12px 16px;
+  font-size: 14px;
+}
+
+.export-progress {
+  margin-top: 12px;
+  padding: 10px;
+  background: #eef2ff;
+  border-radius: 6px;
+  font-size: 12px;
+  color: #4f46e5;
+  text-align: center;
+}
+
+.review-group {
+  margin-bottom: 16px;
+}
+
+.review-group-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 8px;
+  font-size: 12px;
+  font-weight: 600;
+  color: #6b7280;
+  margin-bottom: 8px;
+}
+
+.review-group-title .count-badge {
+  background: #e5e7eb;
+  color: #374151;
+  padding: 1px 8px;
+  border-radius: 10px;
+  font-size: 11px;
+}
+
+.review-group-overdue .review-group-title {
+  color: #991b1b;
+}
+
+.review-group-overdue .review-group-title .count-badge {
+  background: #fee2e2;
+  color: #991b1b;
+}
+
+.review-group-today .review-group-title {
+  color: #92400e;
+}
+
+.review-group-today .review-group-title .count-badge {
+  background: #fef3c7;
+  color: #92400e;
+}
+
+.review-group-mastered .review-group-title {
+  color: #065f46;
+}
+
+.review-group-mastered .review-group-title .count-badge {
+  background: #d1fae5;
+  color: #065f46;
+}
+
+.review-group-pending .review-group-title {
+  color: #1e40af;
+}
+
+.review-group-pending .review-group-title .count-badge {
+  background: #dbeafe;
+  color: #1e40af;
+}

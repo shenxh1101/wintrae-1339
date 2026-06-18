@@ -5,16 +5,18 @@ const StudyNoteContent = {
   settings: null,
   lastTimestamp: 0,
 
-  init() {
-    this.loadSettings();
+  async init() {
+    await this.loadSettings();
     this.detectVideo();
     this.setupMutationObserver();
     this.setupMessageListener();
 
-    if (document.readyState === 'complete') {
-      this.injectFloatWindow();
-    } else {
-      window.addEventListener('load', () => this.injectFloatWindow());
+    if (this.settings?.floatWindowVisible !== false) {
+      if (document.readyState === 'complete') {
+        this.injectFloatWindow();
+      } else {
+        window.addEventListener('load', () => this.injectFloatWindow());
+      }
     }
   },
 
@@ -296,21 +298,37 @@ const StudyNoteContent = {
     this.floatWindow.querySelector('#study-note-btn-note').addEventListener('click', () => this.quickNote());
     this.floatWindow.querySelector('#study-note-btn-bookmark').addEventListener('click', () => this.quickBookmark());
     this.floatWindow.querySelector('#study-note-btn-screenshot').addEventListener('click', () => this.quickScreenshot());
-    this.floatWindow.querySelector('#study-note-btn-sidebar').addEventListener('click', () => {
-      chrome.runtime.sendMessage({ action: 'openSidebar' }).catch(() => {});
-      this.showNotification('请点击扩展图标打开侧边栏');
+    this.floatWindow.querySelector('#study-note-btn-sidebar').addEventListener('click', async () => {
+      const ok = await chrome.runtime.sendMessage({ action: 'openSidebar' }).catch(() => false);
+      if (!ok) {
+        this.showNotification('打开侧边栏失败，请尝试点击扩展图标');
+      }
     });
-    this.floatWindow.querySelector('#study-note-float-close').addEventListener('click', () => {
+    this.floatWindow.querySelector('#study-note-float-close').addEventListener('click', async () => {
       this.floatWindow.style.display = 'none';
+      try {
+        await chrome.runtime.sendMessage({
+          action: 'saveSettings',
+          settings: { floatWindowVisible: false }
+        });
+        if (this.settings) this.settings.floatWindowVisible = false;
+      } catch (e) {}
+      this.showNotification('浮动窗口已隐藏，可在设置中重新显示');
     });
   },
 
   toggleFloatWindow(visible) {
-    if (!this.floatWindow) {
-      if (visible !== false) this.injectFloatWindow();
-      return;
+    if (visible === false) {
+      if (this.floatWindow) this.floatWindow.style.display = 'none';
+      if (this.settings) this.settings.floatWindowVisible = false;
+    } else {
+      if (!this.floatWindow) {
+        this.injectFloatWindow();
+      } else {
+        this.floatWindow.style.display = 'block';
+      }
+      if (this.settings) this.settings.floatWindowVisible = true;
     }
-    this.floatWindow.style.display = visible === false ? 'none' : 'block';
   },
 
   makeDraggable(element, handle) {

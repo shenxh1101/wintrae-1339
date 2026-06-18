@@ -50,7 +50,7 @@
           <div class="empty-state">
             <div class="empty-icon">📝</div>
             <p>还没有笔记</p>
-            <p class="empty-hint">使用 Ctrl+Shift+N 快速记录</p>
+            <p class="empty-hint" data-shortcut="quickNote">使用 Ctrl+Shift+N 快速记录</p>
           </div>
         </div>
       </div>
@@ -64,7 +64,7 @@
           <div class="empty-state">
             <div class="empty-icon">🔖</div>
             <p>还没有书签</p>
-            <p class="empty-hint">使用 Ctrl+Shift+B 快速添加</p>
+            <p class="empty-hint" data-shortcut="quickBookmark">使用 Ctrl+Shift+B 快速添加</p>
           </div>
         </div>
       </div>
@@ -77,7 +77,7 @@
           <div class="empty-state">
             <div class="empty-icon">📷</div>
             <p>还没有截图</p>
-            <p class="empty-hint">使用 Ctrl+Shift+S 截取画面</p>
+            <p class="empty-hint" data-shortcut="quickScreenshot">使用 Ctrl+Shift+S 截取画面</p>
           </div>
         </div>
       </div>
@@ -86,8 +86,10 @@
         <div class="list-header">
           <div class="filter-tabs">
             <button class="filter-btn active" data-filter="all">全部</button>
+            <button class="filter-btn" data-filter="overdue">🔴 已过期</button>
+            <button class="filter-btn" data-filter="today">🟡 今天到期</button>
             <button class="filter-btn" data-filter="pending">待复习</button>
-            <button class="filter-btn" data-filter="mastered">已掌握</button>
+            <button class="filter-btn" data-filter="mastered">✅ 已掌握</button>
           </div>
           <button class="btn-primary btn-sm" id="btnAddReview">➕ 添加</button>
         </div>
@@ -95,7 +97,7 @@
           <div class="empty-state">
             <div class="empty-icon">🔁</div>
             <p>还没有复习计划</p>
-            <p class="empty-hint">添加需要复习的内容</p>
+            <p class="empty-hint">从笔记、书签、截图一键加入，或手动添加</p>
           </div>
         </div>
       </div>
@@ -106,7 +108,7 @@
           <div class="setting-item">
             <label class="setting-label">
               <span>显示浮动窗口</span>
-              <small>页面右下角的快捷操作面板</small>
+              <small>页面上的快捷操作面板</small>
             </label>
             <label class="switch">
               <input type="checkbox" id="settingFloatWindow" checked />
@@ -126,7 +128,7 @@
           <div class="setting-item">
             <label class="setting-label">
               <span>复习提醒天数</span>
-              <small>间隔多少天后提醒复习</small>
+              <small>默认间隔多少天后提醒复习</small>
             </label>
             <input type="number" id="settingReminderDays" class="setting-input" min="1" max="30" value="7" />
           </div>
@@ -134,30 +136,98 @@
 
         <div class="settings-section">
           <h3 class="settings-title">⌨️ 快捷键</h3>
-          <div class="setting-item">
-            <span class="setting-label">快速笔记</span>
-            <kbd class="key-badge">Ctrl+Shift+N</kbd>
+          <div class="shortcut-list-wrapper">
+            <div class="setting-item shortcut-item" data-key="quickNote">
+              <div class="setting-label">
+                <span>快速笔记</span>
+                <small>在视频页面快速记录当前时间点笔记</small>
+              </div>
+              <div class="shortcut-controls">
+                <kbd class="key-badge" id="shortcut-quickNote">Ctrl+Shift+N</kbd>
+                <button class="shortcut-edit-btn" data-action="editShortcut" data-key="quickNote" title="编辑">✏️</button>
+              </div>
+            </div>
+            <div class="setting-item shortcut-item" data-key="quickBookmark">
+              <div class="setting-label">
+                <span>添加书签</span>
+                <small>快速保存当前播放位置为书签</small>
+              </div>
+              <div class="shortcut-controls">
+                <kbd class="key-badge" id="shortcut-quickBookmark">Ctrl+Shift+B</kbd>
+                <button class="shortcut-edit-btn" data-action="editShortcut" data-key="quickBookmark" title="编辑">✏️</button>
+              </div>
+            </div>
+            <div class="setting-item shortcut-item" data-key="quickScreenshot">
+              <div class="setting-label">
+                <span>截取画面</span>
+                <small>截取当前视频画面并进行标注</small>
+              </div>
+              <div class="shortcut-controls">
+                <kbd class="key-badge" id="shortcut-quickScreenshot">Ctrl+Shift+S</kbd>
+                <button class="shortcut-edit-btn" data-action="editShortcut" data-key="quickScreenshot" title="编辑">✏️</button>
+              </div>
+            </div>
+            <div class="setting-item shortcut-item" data-key="toggleSidebar">
+              <div class="setting-label">
+                <span>切换侧边栏</span>
+                <small>快速打开/关闭笔记助手侧边栏</small>
+              </div>
+              <div class="shortcut-controls">
+                <kbd class="key-badge" id="shortcut-toggleSidebar">Ctrl+Shift+P</kbd>
+                <button class="shortcut-edit-btn" data-action="editShortcut" data-key="toggleSidebar" title="编辑">✏️</button>
+              </div>
+            </div>
           </div>
-          <div class="setting-item">
-            <span class="setting-label">添加书签</span>
-            <kbd class="key-badge">Ctrl+Shift+B</kbd>
+          <div class="shortcut-footer">
+            <button class="btn-secondary btn-sm" id="btnOpenShortcutsPage">� 打开浏览器快捷键设置页</button>
+            <p class="settings-hint">💡 受浏览器安全限制，扩展无法直接修改系统快捷键。点击上方按钮打开浏览器设置页手动配置，配置完成后回来点击单个快捷键旁的「编辑」按钮录入新的快捷键提示。</p>
           </div>
-          <div class="setting-item">
-            <span class="setting-label">截取画面</span>
-            <kbd class="key-badge">Ctrl+Shift+S</kbd>
-          </div>
-          <div class="setting-item">
-            <span class="setting-label">切换侧边栏</span>
-            <kbd class="key-badge">Ctrl+Shift+P</kbd>
-          </div>
-          <p class="settings-hint">💡 快捷键可在 chrome://extensions/shortcuts 中自定义</p>
         </div>
 
         <div class="settings-section">
-          <h3 class="settings-title">📦 数据管理</h3>
+          <h3 class="settings-title">📦 导出学习资料包</h3>
+          <div class="export-options">
+            <div class="setting-item">
+              <label class="setting-label">
+                <span>选择课程</span>
+                <small>选择要导出的课程</small>
+              </label>
+              <select id="exportCourseSelect" class="setting-input" style="width:160px;">
+                <option value="__all__">📚 全部课程</option>
+              </select>
+            </div>
+            <div class="setting-item">
+              <label class="setting-label">
+                <span>导出内容</span>
+                <small>选择需要打包导出的内容</small>
+              </label>
+            </div>
+            <div class="export-checkboxes">
+              <label class="checkbox-label"><input type="checkbox" id="exportNotes" checked /> 📝 笔记</label>
+              <label class="checkbox-label"><input type="checkbox" id="exportBookmarks" checked /> 🔖 书签</label>
+              <label class="checkbox-label"><input type="checkbox" id="exportScreenshots" checked /> 📷 截图+标注</label>
+              <label class="checkbox-label"><input type="checkbox" id="exportReviews" /> 🔁 复习计划</label>
+            </div>
+            <div class="setting-item">
+              <label class="setting-label">
+                <span>导出格式</span>
+                <small>Markdown 适合阅读，JSON 适合备份恢复</small>
+              </label>
+            </div>
+            <div class="export-format-group">
+              <label class="format-option"><input type="radio" name="exportFormat" value="markdown" checked /> 📄 Markdown (.md) + 截图文件夹</label>
+              <label class="format-option"><input type="radio" name="exportFormat" value="json" /> 💾 JSON (.json) 完整备份</label>
+            </div>
+          </div>
+          <div class="export-actions">
+            <button class="btn-primary" id="btnDoExport">⬇️ 生成资料包并下载</button>
+            <p class="export-progress" id="exportProgress" style="display:none;"></p>
+          </div>
+        </div>
+
+        <div class="settings-section">
+          <h3 class="settings-title">🗑️ 数据管理</h3>
           <div class="settings-actions">
-            <button class="btn-secondary" id="btnExportAll">导出全部数据 (JSON)</button>
-            <button class="btn-secondary" id="btnExportNotes">导出笔记 (Markdown)</button>
             <button class="btn-danger" id="btnCleanCourses">清理无效课程</button>
             <button class="btn-danger-outline" id="btnClearAll">清空所有数据</button>
           </div>
@@ -166,7 +236,7 @@
         <div class="settings-section">
           <h3 class="settings-title">ℹ️ 关于</h3>
           <div class="about-info">
-            <p><strong>网课学习笔记助手</strong> v1.0.0</p>
+            <p><strong>网课学习笔记助手</strong> v1.1.0</p>
             <p>帮助你高效整理视频学习重点</p>
           </div>
         </div>
