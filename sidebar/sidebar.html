@@ -84,7 +84,7 @@
 
       <div class="tab-pane" id="tab-reviews">
         <div class="list-header">
-          <div class="filter-tabs">
+          <div class="filter-tabs" id="reviewFilterTabs">
             <button class="filter-btn active" data-filter="all">全部</button>
             <button class="filter-btn" data-filter="overview">🔥 今日总览</button>
             <button class="filter-btn" data-filter="overdue">🔴 已过期</button>
@@ -92,6 +92,10 @@
             <button class="filter-btn" data-filter="pending">待复习</button>
             <button class="filter-btn" data-filter="mastered">✅ 已掌握</button>
           </div>
+        </div>
+        <div class="review-view-switcher">
+          <button class="view-btn active" data-view="list">📋 列表视图</button>
+          <button class="view-btn" data-view="week">📅 周视图</button>
           <button class="btn-primary btn-sm" id="btnAddReview">➕ 添加</button>
         </div>
         <div class="list-container" id="reviewsList">
@@ -100,6 +104,8 @@
             <p>还没有复习计划</p>
             <p class="empty-hint">从笔记、书签、截图一键加入，或手动添加</p>
           </div>
+        </div>
+        <div class="week-view-container" id="weekViewContainer" style="display:none;">
         </div>
       </div>
 
@@ -231,7 +237,41 @@
         </div>
 
         <div class="settings-section">
-          <h3 class="settings-title">🗑️ 数据管理</h3>
+          <h3 class="settings-title">� 导入恢复资料</h3>
+          <div class="export-options">
+            <p class="settings-hint">
+              支持导入本扩展导出的 JSON 资料包，可还原课程、笔记、书签、截图和复习计划。
+              导入前会自动检测重复项，您可以选择合并或跳过。
+            </p>
+            <div class="setting-item">
+              <label class="setting-label">
+                <span>选择文件</span>
+                <small>选择 .json 格式的资料包</small>
+              </label>
+              <input type="file" id="importFileInput" accept=".json" style="display:none;" />
+              <button class="btn-secondary" id="btnChooseImportFile" style="width:auto;padding:8px 16px;">📂 选择 JSON 文件</button>
+            </div>
+            <div class="setting-item">
+              <label class="setting-label">
+                <span>重复处理方式</span>
+                <small>遇到相同内容时如何处理</small>
+              </label>
+              <select id="importConflictMode" class="setting-input" style="width:160px;">
+                <option value="ask">每次询问</option>
+                <option value="skip">全部跳过</option>
+                <option value="overwrite">全部覆盖</option>
+                <option value="duplicate">全部保留（新建）</option>
+              </select>
+            </div>
+          </div>
+          <div class="export-actions">
+            <button class="btn-primary" id="btnDoImport" style="background:#10b981;">📥 开始导入</button>
+            <p class="export-progress" id="importProgress" style="display:none;background:#d1fae5;color:#065f46;"></p>
+          </div>
+        </div>
+
+        <div class="settings-section">
+          <h3 class="settings-title">��️ 数据管理</h3>
           <div class="settings-actions">
             <button class="btn-danger" id="btnCleanCourses">清理无效课程</button>
             <button class="btn-danger-outline" id="btnClearAll">清空所有数据</button>

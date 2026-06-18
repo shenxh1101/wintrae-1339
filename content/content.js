@@ -87,6 +87,8 @@ const StudyNoteContent = {
         return this.showNotification(msg.message);
       case 'toggleFloatWindow':
         return this.toggleFloatWindow(msg.visible);
+      case 'shortcutsUpdated':
+        return this.updateShortcutTooltips(msg.shortcuts);
       case 'getScreenshotFromVideo':
         return this.captureVideoFrame();
       default:
@@ -336,6 +338,23 @@ const StudyNoteContent = {
       }
       if (this.settings) this.settings.floatWindowVisible = true;
     }
+  },
+
+  updateShortcutTooltips(shortcuts) {
+    if (!this.settings) this.settings = {};
+    this.settings.shortcuts = shortcuts || {};
+    if (!this.floatWindow) return;
+    const defaults = {
+      quickNote: 'Ctrl+Shift+N',
+      quickBookmark: 'Ctrl+Shift+B',
+      quickScreenshot: 'Ctrl+Shift+S',
+      toggleSidebar: 'Ctrl+Shift+P'
+    };
+    const s = { ...defaults, ...shortcuts };
+    this.floatWindow.querySelector('#study-note-btn-note').title = `快速笔记 (${s.quickNote})`;
+    this.floatWindow.querySelector('#study-note-btn-bookmark').title = `添加书签 (${s.quickBookmark})`;
+    this.floatWindow.querySelector('#study-note-btn-screenshot').title = `截图 (${s.quickScreenshot})`;
+    this.floatWindow.querySelector('#study-note-btn-sidebar').title = `打开侧边栏 (${s.toggleSidebar})`;
   },
 
   makeDraggable(element, handle) {

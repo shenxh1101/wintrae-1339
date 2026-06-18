@@ -4,7 +4,9 @@ const SidebarApp = {
   currentChapterId: null,
   activeTab: 'notes',
   reviewFilter: 'all',
+  reviewView: 'list',
   currentSettings: null,
+  _importFile: null,
 
   shortcutLabels: {
     quickNote: '快速笔记',
@@ -106,6 +108,24 @@ const SidebarApp = {
         btn.classList.add('active');
         this.reviewFilter = btn.dataset.filter;
         this.renderReviews();
+        if (this.reviewView === 'week') this.renderWeekView();
+      });
+    });
+
+    document.querySelectorAll('.view-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        document.querySelectorAll('.view-btn').forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+        this.reviewView = btn.dataset.view;
+        if (this.reviewView === 'list') {
+          document.getElementById('reviewsList').style.display = '';
+          document.getElementById('weekViewContainer').style.display = 'none';
+          this.renderReviews();
+        } else {
+          document.getElementById('reviewsList').style.display = 'none';
+          document.getElementById('weekViewContainer').style.display = '';
+          this.renderWeekView();
+        }
       });
     });
 
@@ -115,12 +135,14 @@ const SidebarApp = {
       await this.loadCourses();
       this.populateExportCourseSelect();
       this.renderCurrentTab();
+      if (this.reviewView === 'week') this.renderWeekView();
       this.showToast('数据已刷新');
     });
 
     this.setupSettingsListeners();
     this.setupShortcutListeners();
     this.setupExportListeners();
+    this.setupImportListeners();
   },
 
   setupSettingsListeners() {
@@ -193,6 +215,20 @@ const SidebarApp = {
 
   setupExportListeners() {
     document.getElementById('btnDoExport').addEventListener('click', () => this.doExport());
+  },
+
+  setupImportListeners() {
+    document.getElementById('btnChooseImportFile').addEventListener('click', () => {
+      document.getElementById('importFileInput').click();
+    });
+    document.getElementById('importFileInput').addEventListener('change', (e) => {
+      const file = e.target.files[0];
+      if (file) {
+        this._importFile = file;
+        this.showToast(`已选择：${file.name}`);
+      }
+    });
+    document.getElementById('btnDoImport').addEventListener('click', () => this.doImport());
   },
 
   populateExportCourseSelect() {
@@ -312,6 +348,17 @@ const SidebarApp = {
       this.currentSettings.shortcuts = newShortcuts;
       this.refreshShortcutBadges();
       this.updateAllShortcutHints();
+
+      try {
+        const tabs = await chrome.tabs.query({});
+        for (const tab of tabs) {
+          chrome.tabs.sendMessage(tab.id, {
+            action: 'shortcutsUpdated',
+            shortcuts: newShortcuts
+          }).catch(() => {});
+        }
+      } catch (e) {}
+
       this.closeModal();
       this.showToast(`已更新：${this.shortcutLabels[key]} = ${val}`);
       document.removeEventListener('keydown', keydownHandler);
@@ -533,6 +580,213 @@ const SidebarApp = {
     progressEl.textContent = `✅ 导出成功！Markdown + ${ssCount} 张截图已下载（请放同一文件夹）`;
     this.showToast(`Markdown + ${ssCount} 张截图已下载`);
     setTimeout(() => progressEl.style.display = 'none', 6000);
+  },
+
+  async doImport() {
+    const file = this._importFile;
+    if (!file) {
+      this.showToast('请先选择 JSON 文件');
+      return;
+    }
+
+    const progressEl = document.getElementById('importProgress');
+    progressEl.style.display = 'block';
+    progressEl.textContent = '正在解析文件...';
+
+    try {
+      const text = await file.text();
+      const data = JSON.parse(text);
+
+      if (!data.courses || !Array.isArray(data.courses)) {
+        throw new Error('文件格式不正确：缺少 courses 数组');
+      }
+
+      const conflictMode = document.getElementById('importConflictMode').value;
+      const stats = { courses: 0, notes: 0, bookmarks: 0, screenshots: 0, reviews: 0, skipped: 0, conflicts: 0 };
+
+      const existingCourses = [...this.courses];
+      const notesResp = await chrome.runtime.sendMessage({ action: 'getNotes', filter: {} });
+      const bookmarksResp = await chrome.runtime.sendMessage({ action: 'getBookmarks', filter: {} });
+      const screenshotsResp = await chrome.runtime.sendMessage({ action: 'getScreenshots', filter: {} });
+      const reviewsResp = await chrome.runtime.sendMessage({ action: 'getReviews', filter: {} });
+      const existingNotes = notesResp?.data || [];
+      const existingBms = bookmarksResp?.data || [];
+      const existingSss = screenshotsResp?.data || [];
+      const existingReviews = reviewsResp?.data || [];
+
+      const conflicts = [];
+
+      for (const courseData of data.courses) {
+        const courseMatch = existingCourses.find(c =>
+          (courseData.id && c.id === courseData.id) ||
+          (courseData.url && c.url === courseData.url) ||
+          (courseData.title && c.title === courseData.title)
+        );
+
+        let targetCourseId = courseMatch?.id;
+
+        if (courseMatch) {
+          stats.conflicts++;
+          if (conflictMode === 'skip') {
+            stats.skipped++;
+            continue;
+          } else if (conflictMode === 'duplicate') {
+            targetCourseId = null;
+          }
+        }
+
+        const courseToSave = { ...courseData };
+        delete courseToSave.notes;
+        delete courseToSave.bookmarks;
+        delete courseToSave.screenshots;
+        delete courseToSave.reviews;
+
+        if (!targetCourseId) {
+          if (!courseToSave.chapters) courseToSave.chapters = [];
+          const savedCourse = await chrome.runtime.sendMessage({ action: 'saveCourse', course: courseToSave });
+          targetCourseId = savedCourse?.data?.id;
+          stats.courses++;
+        } else if (conflictMode === 'overwrite') {
+          courseToSave.id = targetCourseId;
+          await chrome.runtime.sendMessage({ action: 'saveCourse', course: courseToSave });
+          stats.courses++;
+        }
+
+        const chapterIdMap = {};
+        const existingCourse = existingCourses.find(c => c.id === targetCourseId);
+        const importChapters = courseData.chapters || [];
+        for (const ch of importChapters) {
+          let existingCh = existingCourse?.chapters?.find(c =>
+            c.title === ch.title || c.id === ch.id
+          );
+          if (existingCh) {
+            chapterIdMap[ch.id] = existingCh.id;
+          } else {
+            const newCh = { ...ch, id: Date.now().toString(36) + Math.random().toString(36).slice(2, 6) };
+            if (!existingCourse.chapters) existingCourse.chapters = [];
+            existingCourse.chapters.push(newCh);
+            await chrome.runtime.sendMessage({ action: 'saveCourse', course: existingCourse });
+            chapterIdMap[ch.id] = newCh.id;
+          }
+        }
+
+        const notes = courseData.notes || [];
+        for (const note of notes) {
+          const dup = existingNotes.find(n =>
+            n.courseId === targetCourseId &&
+            Math.abs(n.timestamp - note.timestamp) < 0.5 &&
+            n.content === note.content
+          );
+          if (dup && conflictMode === 'skip') {
+            stats.skipped++;
+            continue;
+          }
+          if (dup && conflictMode === 'overwrite') {
+            note.id = dup.id;
+            note.courseId = targetCourseId;
+            note.chapterId = note.chapterId ? (chapterIdMap[note.chapterId] || targetCourseId) : null;
+            await chrome.runtime.sendMessage({ action: 'saveNote', note });
+            stats.notes++;
+            continue;
+          }
+          const newNote = { ...note, id: undefined, courseId: targetCourseId };
+          newNote.chapterId = note.chapterId ? (chapterIdMap[note.chapterId] || null) : null;
+          await chrome.runtime.sendMessage({ action: 'saveNote', note: newNote });
+          stats.notes++;
+        }
+
+        const bookmarks = courseData.bookmarks || [];
+        for (const bm of bookmarks) {
+          const dup = existingBms.find(b =>
+            b.courseId === targetCourseId &&
+            Math.abs(b.timestamp - bm.timestamp) < 0.5 &&
+            b.title === bm.title
+          );
+          if (dup && conflictMode === 'skip') {
+            stats.skipped++;
+            continue;
+          }
+          if (dup && conflictMode === 'overwrite') {
+            bm.id = dup.id;
+            bm.courseId = targetCourseId;
+            bm.chapterId = bm.chapterId ? (chapterIdMap[bm.chapterId] || null) : null;
+            await chrome.runtime.sendMessage({ action: 'saveBookmark', bookmark: bm });
+            stats.bookmarks++;
+            continue;
+          }
+          const newBm = { ...bm, id: undefined, courseId: targetCourseId };
+          newBm.chapterId = bm.chapterId ? (chapterIdMap[bm.chapterId] || null) : null;
+          await chrome.runtime.sendMessage({ action: 'saveBookmark', bookmark: newBm });
+          stats.bookmarks++;
+        }
+
+        const screenshots = courseData.screenshots || [];
+        for (const ss of screenshots) {
+          const dup = existingSss.find(s =>
+            s.courseId === targetCourseId &&
+            Math.abs(s.timestamp - ss.timestamp) < 0.5 &&
+            s.title === ss.title
+          );
+          if (dup && conflictMode === 'skip') {
+            stats.skipped++;
+            continue;
+          }
+          if (dup && conflictMode === 'overwrite') {
+            ss.id = dup.id;
+            ss.courseId = targetCourseId;
+            ss.chapterId = ss.chapterId ? (chapterIdMap[ss.chapterId] || null) : null;
+            await chrome.runtime.sendMessage({ action: 'saveScreenshot', screenshot: ss });
+            stats.screenshots++;
+            continue;
+          }
+          const newSs = { ...ss, id: undefined, courseId: targetCourseId };
+          newSs.chapterId = ss.chapterId ? (chapterIdMap[ss.chapterId] || null) : null;
+          await chrome.runtime.sendMessage({ action: 'saveScreenshot', screenshot: newSs });
+          stats.screenshots++;
+        }
+
+        const reviews = courseData.reviews || [];
+        for (const rv of reviews) {
+          const dup = existingReviews.find(r =>
+            r.courseId === targetCourseId &&
+            r.title === rv.title
+          );
+          if (dup && conflictMode === 'skip') {
+            stats.skipped++;
+            continue;
+          }
+          if (dup && conflictMode === 'overwrite') {
+            rv.id = dup.id;
+            rv.courseId = targetCourseId;
+            rv.chapterId = rv.chapterId ? (chapterIdMap[rv.chapterId] || null) : null;
+            await chrome.runtime.sendMessage({ action: 'saveReview', review: rv });
+            stats.reviews++;
+            continue;
+          }
+          const newRv = { ...rv, id: undefined, courseId: targetCourseId };
+          newRv.chapterId = rv.chapterId ? (chapterIdMap[rv.chapterId] || null) : null;
+          await chrome.runtime.sendMessage({ action: 'saveReview', review: newRv });
+          stats.reviews++;
+        }
+      }
+
+      progressEl.textContent = `✅ 导入完成！${stats.courses}门课程 / ${stats.notes}条笔记 / ${stats.bookmarks}个书签 / ${stats.screenshots}张截图 / ${stats.reviews}条复习计划 / 跳过${stats.skipped}项`;
+      this.showToast('导入完成');
+
+      await this.loadCourses();
+      this.populateExportCourseSelect();
+      this.renderCurrentTab();
+
+      setTimeout(() => progressEl.style.display = 'none', 6000);
+      this._importFile = null;
+      document.getElementById('importFileInput').value = '';
+
+    } catch (e) {
+      console.error(e);
+      progressEl.textContent = '❌ 导入失败：' + e.message;
+      this.showToast('导入失败: ' + e.message);
+      setTimeout(() => progressEl.style.display = 'none', 4000);
+    }
   },
 
   renderCurrentTab() {
@@ -778,7 +1032,7 @@ const SidebarApp = {
         r.nextReviewAt &&
         r.nextReviewAt <= endOfToday.getTime()
       );
-    } else if (this.currentCourseId && this.reviewFilter === 'all') {
+    } else if (this.currentCourseId) {
       reviews = reviews.filter(r => r.courseId === this.currentCourseId);
     }
 
@@ -907,6 +1161,7 @@ const SidebarApp = {
           }
           await chrome.runtime.sendMessage({ action: 'saveReview', review });
           this.renderReviews();
+          if (this.reviewView === 'week') this.renderWeekView();
           this.showToast(review.status === 'mastered' ? '已标记为已掌握' : '已恢复为待复习');
         }
       });
@@ -918,6 +1173,156 @@ const SidebarApp = {
         e.stopPropagation();
         if (confirm('确定删除这条复习记录吗？')) {
           await chrome.runtime.sendMessage({ action: 'deleteReview', reviewId: id });
+          this.renderReviews();
+          if (this.reviewView === 'week') this.renderWeekView();
+          this.showToast('已删除');
+        }
+      });
+    });
+  },
+
+  async renderWeekView() {
+    const container = document.getElementById('weekViewContainer');
+    const resp = await chrome.runtime.sendMessage({ action: 'getReviews', filter: {} });
+    let reviews = resp?.data || [];
+
+    const startOfToday = new Date(); startOfToday.setHours(0, 0, 0, 0);
+    const endOfToday = new Date(); endOfToday.setHours(23, 59, 59, 999);
+    const startOfTomorrow = new Date(endOfToday.getTime() + 1);
+    const endOfTomorrow = new Date(startOfTomorrow.getTime() + 24 * 60 * 60 * 1000 - 1);
+    const endOfWeek = new Date(startOfToday.getTime() + 7 * 24 * 60 * 60 * 1000 - 1);
+
+    if (this.reviewFilter === 'overview') {
+      reviews = reviews.filter(r =>
+        r.status !== 'mastered' &&
+        r.nextReviewAt &&
+        r.nextReviewAt <= endOfToday.getTime()
+      );
+    } else if (this.currentCourseId) {
+      reviews = reviews.filter(r => r.courseId === this.currentCourseId);
+    }
+
+    const groups = { overdue: [], today: [], tomorrow: [], week: [], later: [], mastered: [] };
+
+    for (const r of reviews) {
+      if (r.status === 'mastered') {
+        groups.mastered.push(r);
+      } else if (!r.nextReviewAt) {
+        groups.later.push(r);
+      } else if (r.nextReviewAt < startOfToday.getTime()) {
+        groups.overdue.push(r);
+      } else if (r.nextReviewAt >= startOfToday.getTime() && r.nextReviewAt <= endOfToday.getTime()) {
+        groups.today.push(r);
+      } else if (r.nextReviewAt >= startOfTomorrow.getTime() && r.nextReviewAt <= endOfTomorrow.getTime()) {
+        groups.tomorrow.push(r);
+      } else if (r.nextReviewAt >= startOfTomorrow.getTime() && r.nextReviewAt <= endOfWeek.getTime()) {
+        groups.week.push(r);
+      } else {
+        groups.later.push(r);
+      }
+    }
+
+    let displayGroups;
+    if (this.reviewFilter === 'overdue') {
+      displayGroups = [{ key: 'overdue', label: '🔴 已过期', cls: 'overdue' }];
+    } else if (this.reviewFilter === 'today') {
+      displayGroups = [{ key: 'today', label: '🟡 今天', cls: 'today' }];
+    } else if (this.reviewFilter === 'pending') {
+      displayGroups = [
+        { key: 'today', label: '🟡 今天', cls: 'today' },
+        { key: 'tomorrow', label: '🔵 明天', cls: 'tomorrow' },
+        { key: 'week', label: '🟢 本周', cls: 'week' },
+        { key: 'later', label: '⚪ 以后', cls: '' }
+      ];
+    } else if (this.reviewFilter === 'mastered') {
+      displayGroups = [{ key: 'mastered', label: '✅ 已掌握', cls: '' }];
+    } else {
+      displayGroups = [
+        { key: 'overdue', label: '🔴 已过期', cls: 'overdue' },
+        { key: 'today', label: '🟡 今天', cls: 'today' },
+        { key: 'tomorrow', label: '🔵 明天', cls: 'tomorrow' },
+        { key: 'week', label: '🟢 本周', cls: 'week' },
+        { key: 'later', label: '⚪ 以后', cls: '' }
+      ];
+    }
+
+    const hasAny = displayGroups.some(g => groups[g.key].length > 0);
+    if (!hasAny) {
+      container.innerHTML = '<div class="week-empty">本周暂无复习计划 🎉</div>';
+      return;
+    }
+
+    let html = '';
+    for (const g of displayGroups) {
+      const items = groups[g.key];
+      if (items.length === 0) continue;
+      const course = items.length === 1 ? this.courses.find(c => c.id === items[0].courseId) : null;
+
+      html += `<div class="week-day-group ${g.cls}">`;
+      html += `<div class="week-day-header"><span>${g.label}</span><span class="day-count">${items.length}</span></div>`;
+      html += `<div class="week-day-items">`;
+
+      for (const r of items) {
+        const c = this.courses.find(c => c.id === r.courseId);
+        html += `
+          <div class="week-day-item" data-id="${r.id}">
+            <div class="item-main">
+              <div class="item-title">${this.escapeHtml(r.title || '未命名')}</div>
+              <div class="item-meta">
+                ${c ? `<span class="tag">${this.escapeHtml(c.title)}</span>` : ''}
+                ${r.timestamp != null ? `<span class="tag time-tag" data-action="jump" data-time="${r.timestamp}" data-course="${r.courseId}">📍 ${this.formatTime(r.timestamp)}</span>` : ''}
+                ${r.nextReviewAt ? `<span class="tag">⏰ ${new Date(r.nextReviewAt).toLocaleDateString()}</span>` : ''}
+              </div>
+            </div>
+            <div class="item-actions">
+              ${r.status !== 'mastered' ? `<button class="item-action" data-action="schedule" title="标记已复习">📅</button>` : ''}
+              <button class="item-action" data-action="toggleStatus" title="${r.status === 'mastered' ? '恢复为待复习' : '标记为已掌握'}">${r.status === 'mastered' ? '↩️' : '✅'}</button>
+              <button class="item-action" data-action="delete" title="删除">🗑️</button>
+            </div>
+          </div>
+        `;
+      }
+
+      html += `</div></div>`;
+    }
+
+    container.innerHTML = html;
+    this.bindWeekViewEvents(container);
+  },
+
+  bindWeekViewEvents(container) {
+    container.querySelectorAll('.week-day-item').forEach(item => {
+      const id = item.dataset.id;
+      item.querySelector('[data-action="jump"]')?.addEventListener('click', async (e) => {
+        e.stopPropagation();
+        await this.jumpToTimestampForCourse(e.currentTarget.dataset.course, parseFloat(e.currentTarget.dataset.time));
+      });
+      item.querySelector('[data-action="schedule"]')?.addEventListener('click', (e) => {
+        e.stopPropagation();
+        this.showReviewSchedulerModal(id);
+      });
+      item.querySelector('[data-action="toggleStatus"]')?.addEventListener('click', async (e) => {
+        e.stopPropagation();
+        const resp = await chrome.runtime.sendMessage({ action: 'getReviews', filter: {} });
+        const review = resp?.data?.find(r => r.id === id);
+        if (review) {
+          review.status = review.status === 'mastered' ? 'pending' : 'mastered';
+          if (review.status === 'mastered') {
+            review.masteredAt = Date.now();
+          } else {
+            review.masteredAt = null;
+          }
+          await chrome.runtime.sendMessage({ action: 'saveReview', review });
+          this.renderWeekView();
+          this.renderReviews();
+          this.showToast(review.status === 'mastered' ? '已标记为已掌握' : '已恢复为待复习');
+        }
+      });
+      item.querySelector('[data-action="delete"]')?.addEventListener('click', async (e) => {
+        e.stopPropagation();
+        if (confirm('确定删除这条复习记录吗？')) {
+          await chrome.runtime.sendMessage({ action: 'deleteReview', reviewId: id });
+          this.renderWeekView();
           this.renderReviews();
           this.showToast('已删除');
         }
@@ -996,6 +1401,7 @@ const SidebarApp = {
         await chrome.runtime.sendMessage({ action: 'saveReview', review });
         this.closeModal();
         this.renderReviews();
+        if (this.reviewView === 'week') this.renderWeekView();
         this.showToast(`已安排下次复习：${nextDate.toLocaleDateString()}`);
       }
     });
@@ -1281,6 +1687,7 @@ const SidebarApp = {
       await chrome.runtime.sendMessage({ action: 'saveReview', review });
       this.closeModal();
       this.renderReviews();
+      if (this.reviewView === 'week') this.renderWeekView();
       this.showToast('已加入复习计划');
     });
 
@@ -1336,6 +1743,7 @@ const SidebarApp = {
       await chrome.runtime.sendMessage({ action: 'saveReview', review });
       this.closeModal();
       this.renderReviews();
+      if (this.reviewView === 'week') this.renderWeekView();
       this.showToast('已保存');
     });
 
