@@ -142,6 +142,15 @@ async function handleMessage(msg, sender) {
         return false;
       }
 
+    case 'getImportExportHistory':
+      return await StorageSW.getImportExportHistory();
+
+    case 'addImportExportHistory':
+      return await StorageSW.addImportExportHistory(msg.entry);
+
+    case 'clearImportExportHistory':
+      return await StorageSW.clearImportExportHistory();
+
     default:
       throw new Error('Unknown action: ' + msg.action);
   }

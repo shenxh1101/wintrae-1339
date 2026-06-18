@@ -96,6 +96,7 @@
         <div class="review-view-switcher">
           <button class="view-btn active" data-view="list">📋 列表视图</button>
           <button class="view-btn" data-view="week">📅 周视图</button>
+          <button class="view-btn" data-view="month">📆 月视图</button>
           <button class="btn-primary btn-sm" id="btnAddReview">➕ 添加</button>
         </div>
         <div class="list-container" id="reviewsList">
@@ -106,6 +107,8 @@
           </div>
         </div>
         <div class="week-view-container" id="weekViewContainer" style="display:none;">
+        </div>
+        <div class="month-view-container" id="monthViewContainer" style="display:none;">
         </div>
       </div>
 
@@ -237,19 +240,21 @@
         </div>
 
         <div class="settings-section">
-          <h3 class="settings-title">� 导入恢复资料</h3>
+          <h3 class="settings-title">📥 导入恢复资料</h3>
           <div class="export-options">
             <p class="settings-hint">
-              支持导入本扩展导出的 JSON 资料包，可还原课程、笔记、书签、截图和复习计划。
-              导入前会自动检测重复项，您可以选择合并或跳过。
+              支持导入本扩展导出的 <strong>JSON</strong>（完整恢复：课程/笔记/书签/截图/复习）
+              或 <strong>Markdown</strong>（轻量恢复：课程/笔记/书签）。
+              导入前会自动检测重复项，您可以选择逐个确认或批量处理。
             </p>
             <div class="setting-item">
               <label class="setting-label">
                 <span>选择文件</span>
-                <small>选择 .json 格式的资料包</small>
+                <small>支持 .json 和 .md 格式</small>
               </label>
-              <input type="file" id="importFileInput" accept=".json" style="display:none;" />
-              <button class="btn-secondary" id="btnChooseImportFile" style="width:auto;padding:8px 16px;">📂 选择 JSON 文件</button>
+              <input type="file" id="importFileInput" accept=".json,.md" style="display:none;" />
+              <button class="btn-secondary" id="btnChooseImportFile" style="width:auto;padding:8px 16px;">📂 选择文件</button>
+              <span id="importFileName" style="margin-left:10px;font-size:12px;color:#6b7280;">未选择文件</span>
             </div>
             <div class="setting-item">
               <label class="setting-label">
@@ -257,10 +262,10 @@
                 <small>遇到相同内容时如何处理</small>
               </label>
               <select id="importConflictMode" class="setting-input" style="width:160px;">
-                <option value="ask">每次询问</option>
+                <option value="ask">每次询问（推荐）</option>
                 <option value="skip">全部跳过</option>
                 <option value="overwrite">全部覆盖</option>
-                <option value="duplicate">全部保留（新建）</option>
+                <option value="duplicate">全部保留副本</option>
               </select>
             </div>
           </div>
@@ -271,7 +276,16 @@
         </div>
 
         <div class="settings-section">
-          <h3 class="settings-title">��️ 数据管理</h3>
+          <h3 class="settings-title">📜 导入导出历史</h3>
+          <div class="settings-actions">
+            <button class="btn-secondary btn-sm" id="btnRefreshHistory">🔄 刷新</button>
+            <button class="btn-danger-outline btn-sm" id="btnClearHistory">🗑️ 清空记录</button>
+          </div>
+          <div class="history-list" id="historyList" style="max-height:240px;overflow-y:auto;margin-top:8px;"></div>
+        </div>
+
+        <div class="settings-section">
+          <h3 class="settings-title">🗑️ 数据管理</h3>
           <div class="settings-actions">
             <button class="btn-danger" id="btnCleanCourses">清理无效课程</button>
             <button class="btn-danger-outline" id="btnClearAll">清空所有数据</button>

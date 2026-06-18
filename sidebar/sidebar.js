@@ -7,6 +7,8 @@ const SidebarApp = {
   reviewView: 'list',
   currentSettings: null,
   _importFile: null,
+  _monthDate: new Date(),
+  _selectedDay: null,
 
   shortcutLabels: {
     quickNote: '快速笔记',
@@ -29,6 +31,7 @@ const SidebarApp = {
     await this.loadSettings();
     this.updateAllShortcutHints();
     this.populateExportCourseSelect();
+    await this.renderHistory();
     this.renderCurrentTab();
   },
 
@@ -117,14 +120,21 @@ const SidebarApp = {
         document.querySelectorAll('.view-btn').forEach(b => b.classList.remove('active'));
         btn.classList.add('active');
         this.reviewView = btn.dataset.view;
+        const listEl = document.getElementById('reviewsList');
+        const weekEl = document.getElementById('weekViewContainer');
+        const monthEl = document.getElementById('monthViewContainer');
+        listEl.style.display = 'none';
+        weekEl.style.display = 'none';
+        monthEl.style.display = 'none';
         if (this.reviewView === 'list') {
-          document.getElementById('reviewsList').style.display = '';
-          document.getElementById('weekViewContainer').style.display = 'none';
+          listEl.style.display = '';
           this.renderReviews();
-        } else {
-          document.getElementById('reviewsList').style.display = 'none';
-          document.getElementById('weekViewContainer').style.display = '';
+        } else if (this.reviewView === 'week') {
+          weekEl.style.display = '';
           this.renderWeekView();
+        } else if (this.reviewView === 'month') {
+          monthEl.style.display = '';
+          this.renderMonthView();
         }
       });
     });
@@ -136,6 +146,7 @@ const SidebarApp = {
       this.populateExportCourseSelect();
       this.renderCurrentTab();
       if (this.reviewView === 'week') this.renderWeekView();
+      if (this.reviewView === 'month') this.renderMonthView();
       this.showToast('数据已刷新');
     });
 
@@ -143,6 +154,17 @@ const SidebarApp = {
     this.setupShortcutListeners();
     this.setupExportListeners();
     this.setupImportListeners();
+    this.setupHistoryListeners();
+  },
+
+  setupHistoryListeners() {
+    document.getElementById('btnRefreshHistory').addEventListener('click', () => this.renderHistory());
+    document.getElementById('btnClearHistory').addEventListener('click', async () => {
+      if (!confirm('确定清空所有导入导出历史记录吗？')) return;
+      await chrome.runtime.sendMessage({ action: 'clearImportExportHistory' });
+      await this.renderHistory();
+      this.showToast('历史记录已清空');
+    });
   },
 
   setupSettingsListeners() {
@@ -225,6 +247,7 @@ const SidebarApp = {
       const file = e.target.files[0];
       if (file) {
         this._importFile = file;
+        document.getElementById('importFileName').textContent = file.name + ` (${(file.size / 1024).toFixed(1)} KB)`;
         this.showToast(`已选择：${file.name}`);
       }
     });
@@ -438,10 +461,32 @@ const SidebarApp = {
         progressEl.textContent = `✅ 导出成功！共 ${targetCourses.length} 门课程，${ssCount} 张截图`;
         setTimeout(() => progressEl.style.display = 'none', 4000);
         this.showToast('JSON 资料包已下载');
+        await this.addHistoryEntry({
+          type: 'export',
+          format: 'json',
+          filename: `study-notes-${courseLabel}-${timestamp}.json`,
+          courses: targetCourses.length,
+          notes: result.courses.reduce((sum, c) => sum + (c.notes?.length || 0), 0),
+          bookmarks: result.courses.reduce((sum, c) => sum + (c.bookmarks?.length || 0), 0),
+          screenshots: ssCount,
+          reviews: result.courses.reduce((sum, c) => sum + (c.reviews?.length || 0), 0),
+          success: true
+        });
       } else {
         if (withScreenshots && ssCount > 0) {
           progressEl.textContent = `正在处理 ${ssCount} 张截图...`;
           await this.exportMarkdownWithScreenshots(result, courseLabel, timestamp, ssCount);
+          await this.addHistoryEntry({
+            type: 'export',
+            format: 'markdown',
+            filename: `study-notes-${courseLabel}-${timestamp}.md`,
+            courses: targetCourses.length,
+            notes: result.courses.reduce((sum, c) => sum + (c.notes?.length || 0), 0),
+            bookmarks: result.courses.reduce((sum, c) => sum + (c.bookmarks?.length || 0), 0),
+            screenshots: ssCount,
+            reviews: result.courses.reduce((sum, c) => sum + (c.reviews?.length || 0), 0),
+            success: true
+          });
         } else {
           const md = this.buildMarkdown(result);
           const blob = new Blob([md], { type: 'text/markdown' });
@@ -449,6 +494,17 @@ const SidebarApp = {
           progressEl.textContent = `✅ 导出成功！Markdown 文件已下载`;
           setTimeout(() => progressEl.style.display = 'none', 4000);
           this.showToast('Markdown 笔记已下载');
+          await this.addHistoryEntry({
+            type: 'export',
+            format: 'markdown',
+            filename: `study-notes-${courseLabel}-${timestamp}.md`,
+            courses: targetCourses.length,
+            notes: result.courses.reduce((sum, c) => sum + (c.notes?.length || 0), 0),
+            bookmarks: result.courses.reduce((sum, c) => sum + (c.bookmarks?.length || 0), 0),
+            screenshots: 0,
+            reviews: result.courses.reduce((sum, c) => sum + (c.reviews?.length || 0), 0),
+            success: true
+          });
         }
       }
     } catch (e) {
@@ -1162,6 +1218,7 @@ const SidebarApp = {
           await chrome.runtime.sendMessage({ action: 'saveReview', review });
           this.renderReviews();
           if (this.reviewView === 'week') this.renderWeekView();
+          if (this.reviewView === 'month') this.renderMonthView();
           this.showToast(review.status === 'mastered' ? '已标记为已掌握' : '已恢复为待复习');
         }
       });
@@ -1175,6 +1232,7 @@ const SidebarApp = {
           await chrome.runtime.sendMessage({ action: 'deleteReview', reviewId: id });
           this.renderReviews();
           if (this.reviewView === 'week') this.renderWeekView();
+          if (this.reviewView === 'month') this.renderMonthView();
           this.showToast('已删除');
         }
       });
@@ -1315,6 +1373,7 @@ const SidebarApp = {
           await chrome.runtime.sendMessage({ action: 'saveReview', review });
           this.renderWeekView();
           this.renderReviews();
+          if (this.reviewView === 'month') this.renderMonthView();
           this.showToast(review.status === 'mastered' ? '已标记为已掌握' : '已恢复为待复习');
         }
       });
@@ -1324,6 +1383,7 @@ const SidebarApp = {
           await chrome.runtime.sendMessage({ action: 'deleteReview', reviewId: id });
           this.renderWeekView();
           this.renderReviews();
+          if (this.reviewView === 'month') this.renderMonthView();
           this.showToast('已删除');
         }
       });
@@ -1402,6 +1462,7 @@ const SidebarApp = {
         this.closeModal();
         this.renderReviews();
         if (this.reviewView === 'week') this.renderWeekView();
+        if (this.reviewView === 'month') this.renderMonthView();
         this.showToast(`已安排下次复习：${nextDate.toLocaleDateString()}`);
       }
     });
@@ -1688,6 +1749,7 @@ const SidebarApp = {
       this.closeModal();
       this.renderReviews();
       if (this.reviewView === 'week') this.renderWeekView();
+      if (this.reviewView === 'month') this.renderMonthView();
       this.showToast('已加入复习计划');
     });
 
@@ -1744,6 +1806,7 @@ const SidebarApp = {
       this.closeModal();
       this.renderReviews();
       if (this.reviewView === 'week') this.renderWeekView();
+      if (this.reviewView === 'month') this.renderMonthView();
       this.showToast('已保存');
     });
 
@@ -1884,6 +1947,1056 @@ const SidebarApp = {
     toast.classList.add('show');
     clearTimeout(toast._timer);
     toast._timer = setTimeout(() => toast.classList.remove('show'), 2200);
+  },
+
+  async addHistoryEntry(entry) {
+    try {
+      await chrome.runtime.sendMessage({
+        action: 'addImportExportHistory',
+        entry
+      });
+      await this.renderHistory();
+    } catch (e) {
+      console.warn('Failed to add history entry:', e);
+    }
+  },
+
+  async renderHistory() {
+    const container = document.getElementById('historyList');
+    if (!container) return;
+
+    try {
+      const resp = await chrome.runtime.sendMessage({ action: 'getImportExportHistory' });
+      const history = resp?.data || [];
+
+      if (history.length === 0) {
+        container.innerHTML = this.getEmptyState('📋', '暂无历史记录', '导入或导出资料包后会在此处显示');
+        return;
+      }
+
+      container.innerHTML = history.map(item => {
+        const isImport = item.type === 'import';
+        const icon = isImport ? '📥' : '📤';
+        const typeLabel = isImport ? '导入' : '导出';
+        const successCount = [
+          item.courses ? `${item.courses}门课程` : null,
+          item.notes ? `${item.notes}条笔记` : null,
+          item.bookmarks ? `${item.bookmarks}个书签` : null,
+          item.screenshots ? `${item.screenshots}张截图` : null,
+          item.reviews ? `${item.reviews}条复习` : null
+        ].filter(Boolean).join(' / ');
+
+        return `
+          <div class="history-item">
+            <div class="history-icon">${icon}</div>
+            <div class="history-content">
+              <div class="history-title">
+                ${typeLabel} · ${this.escapeHtml(item.filename || '未命名文件')}
+                ${item.success ? '<span class="history-badge success">成功</span>' : '<span class="history-badge error">失败</span>'}
+              </div>
+              <div class="history-meta">
+                <span>${new Date(item.timestamp).toLocaleString()}</span>
+                ${successCount ? `<span>✅ ${successCount}</span>` : ''}
+                ${item.skipped ? `<span>⏭️ 跳过${item.skipped}项</span>` : ''}
+                ${item.conflicts ? `<span>⚠️ 冲突${item.conflicts}项</span>` : ''}
+                ${item.parseErrors ? `<span>❌ 解析失败${item.parseErrors}项</span>` : ''}
+              </div>
+              ${item.format ? `<div class="history-format">格式：${item.format.toUpperCase()}</div>` : ''}
+            </div>
+          </div>
+        `;
+      }).join('');
+    } catch (e) {
+      console.error(e);
+      container.innerHTML = this.getEmptyState('❌', '加载历史记录失败', e.message);
+    }
+  },
+
+  parseTime(str) {
+    if (!str) return 0;
+    const match = str.match(/(\d+):(\d+)(?::(\d+))?/);
+    if (!match) return 0;
+    const h = parseInt(match[1]) || 0;
+    const m = parseInt(match[2]) || 0;
+    const s = parseInt(match[3]) || 0;
+    return h * 3600 + m * 60 + s;
+  },
+
+  parseMarkdown(text) {
+    const result = {
+      courses: [],
+      parseErrors: 0,
+      parsedItems: 0,
+      warnings: []
+    };
+
+    let currentCourse = null;
+    let currentChapter = null;
+    let lines = text.split(/\r?\n/);
+    let lineNum = 0;
+
+    const createCourse = (title) => ({
+      id: 'md-' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
+      title: title.replace(/^##\s*📚\s*/, '').trim(),
+      url: '',
+      chapters: [],
+      notes: [],
+      bookmarks: [],
+      screenshots: [],
+      reviews: []
+    });
+
+    const createChapter = (title) => ({
+      id: 'ch-' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
+      title: title.replace(/^###\s*📖\s*/, '').trim(),
+      createdAt: Date.now()
+    });
+
+    while (lineNum < lines.length) {
+      const line = lines[lineNum].trim();
+      lineNum++;
+
+      try {
+        if (line.startsWith('## ') && line.includes('📚')) {
+          currentCourse = createCourse(line);
+          currentChapter = null;
+          result.courses.push(currentCourse);
+          continue;
+        }
+
+        if (!currentCourse) continue;
+
+        if (line.startsWith('课程链接：')) {
+          currentCourse.url = line.replace('课程链接：', '').trim();
+          continue;
+        }
+
+        if (line.startsWith('### ') && line.includes('📖')) {
+          currentChapter = createChapter(line);
+          currentCourse.chapters.push(currentChapter);
+          continue;
+        }
+
+        if (line.startsWith('#### 🔖 书签')) {
+          while (lineNum < lines.length) {
+            const nextLine = lines[lineNum].trim();
+            if (nextLine.startsWith('#### ') || nextLine.startsWith('### ') || nextLine.startsWith('## ')) break;
+            if (nextLine.startsWith('- **[')) {
+              const bmMatch = nextLine.match(/- \*\*\[([^\]]+)\]\*\*\s*(.+?)(?:\s*`([^`]+)`)?\s*$/);
+              if (bmMatch) {
+                const timestamp = this.parseTime(bmMatch[1]);
+                let title = bmMatch[2].trim();
+                let tags = [];
+                let description = '';
+
+                const tagMatch = title.match(/\s*`([^`]+)`\s*$/);
+                if (tagMatch) {
+                  tags = [tagMatch[1]];
+                  title = title.replace(/\s*`[^`]+`\s*$/, '').trim();
+                }
+
+                if (lineNum + 1 < lines.length) {
+                  const descLine = lines[lineNum + 1].trim();
+                  if (descLine.startsWith('> ')) {
+                    description = descLine.replace(/^>\s*/, '');
+                    lineNum++;
+                  }
+                }
+
+                currentCourse.bookmarks.push({
+                  id: 'bm-' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
+                  courseId: currentCourse.id,
+                  chapterId: currentChapter?.id || null,
+                  title: title || '未命名书签',
+                  timestamp,
+                  description,
+                  tags,
+                  createdAt: Date.now()
+                });
+                result.parsedItems++;
+              }
+            }
+            lineNum++;
+          }
+          continue;
+        }
+
+        if (line.startsWith('#### 📝 笔记')) {
+          while (lineNum < lines.length) {
+            const nextLine = lines[lineNum].trim();
+            if (nextLine.startsWith('#### ') || nextLine.startsWith('### ') || nextLine.startsWith('## ')) break;
+            if (nextLine.startsWith('- **[')) {
+              const noteMatch = nextLine.match(/- \*\*\[([^\]]+)\]\*\*\s*(.+?)(?:\s*`([^`]+)`)?\s*$/);
+              if (noteMatch) {
+                const timestamp = this.parseTime(noteMatch[1]);
+                let content = noteMatch[2].trim();
+                let tags = [];
+
+                const tagMatch = content.match(/\s*`([^`]+)`\s*$/);
+                if (tagMatch) {
+                  tags = [tagMatch[1]];
+                  content = content.replace(/\s*`[^`]+`\s*$/, '').trim();
+                }
+
+                currentCourse.notes.push({
+                  id: 'note-' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
+                  courseId: currentCourse.id,
+                  chapterId: currentChapter?.id || null,
+                  content,
+                  timestamp,
+                  tags,
+                  createdAt: Date.now()
+                });
+                result.parsedItems++;
+              }
+            }
+            lineNum++;
+          }
+          continue;
+        }
+
+        if (line.startsWith('#### 📷 截图')) {
+          while (lineNum < lines.length) {
+            const nextLine = lines[lineNum].trim();
+            if (nextLine.startsWith('#### ') || nextLine.startsWith('### ') || nextLine.startsWith('## ')) break;
+            if (nextLine.startsWith('![')) {
+              const imgMatch = nextLine.match(/!\[([^\]]*)\]\(([^)]+)\)/);
+              if (imgMatch) {
+                const alt = imgMatch[1] || '';
+                const filename = imgMatch[2] || '';
+                const timeMatch = alt.match(/- (\d{1,2}:\d{2}(?::\d{2})?)$/);
+                const timestamp = timeMatch ? this.parseTime(timeMatch[1]) : 0;
+                const title = alt.replace(/ - \d{1,2}:\d{2}(?::\d{2})?$/, '').trim() || '未命名截图';
+
+                let description = '';
+                if (lineNum + 1 < lines.length) {
+                  const descLine = lines[lineNum + 1].trim();
+                  if (descLine.startsWith('> ')) {
+                    description = descLine.replace(/^>\s*/, '');
+                    lineNum++;
+                  }
+                }
+
+                currentCourse.screenshots.push({
+                  id: 'ss-' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
+                  courseId: currentCourse.id,
+                  chapterId: currentChapter?.id || null,
+                  title,
+                  timestamp,
+                  description,
+                  filename,
+                  imageData: '',
+                  annotatedData: '',
+                  createdAt: Date.now()
+                });
+                result.parsedItems++;
+                result.warnings.push(`截图「${title}」仅恢复元数据，图片数据需重新导入`);
+              }
+            }
+            lineNum++;
+          }
+          continue;
+        }
+
+        if (line.startsWith('### 🔁 复习计划')) {
+          while (lineNum < lines.length) {
+            const nextLine = lines[lineNum].trim();
+            if (nextLine.startsWith('#### ') || nextLine.startsWith('### ') || nextLine.startsWith('## ')) break;
+            if (nextLine.startsWith('- **')) {
+              const rvMatch = nextLine.match(/- \*\*(.+?)\*\*\s*-\s*(.+?)(?:\s*下次复习：(.+))?$/);
+              if (rvMatch) {
+                const title = rvMatch[1].trim();
+                const statusText = rvMatch[2].trim();
+                const nextReviewText = rvMatch[3]?.trim();
+
+                let status = 'pending';
+                if (statusText.includes('已掌握')) status = 'mastered';
+                if (statusText.includes('待复习')) status = 'pending';
+
+                let nextReviewAt = null;
+                if (nextReviewText) {
+                  try {
+                    nextReviewAt = new Date(nextReviewText).getTime();
+                  } catch (e) {}
+                }
+
+                let description = '';
+                if (lineNum + 1 < lines.length) {
+                  const descLine = lines[lineNum + 1].trim();
+                  if (descLine.startsWith('> ')) {
+                    description = descLine.replace(/^>\s*/, '');
+                    lineNum++;
+                  }
+                }
+
+                currentCourse.reviews.push({
+                  id: 'rv-' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
+                  courseId: currentCourse.id,
+                  chapterId: currentChapter?.id || null,
+                  title,
+                  description,
+                  status,
+                  nextReviewAt,
+                  createdAt: Date.now()
+                });
+                result.parsedItems++;
+              }
+            }
+            lineNum++;
+          }
+          continue;
+        }
+      } catch (e) {
+        result.parseErrors++;
+        result.warnings.push(`第 ${lineNum} 行解析失败：${e.message}`);
+        continue;
+      }
+    }
+
+    return result;
+  },
+
+  async showConflictDialog(conflicts) {
+    return new Promise((resolve) => {
+      if (conflicts.length === 0) {
+        resolve({ decisions: {}, bulkAction: null });
+        return;
+      }
+
+      const typeLabels = {
+        course: '课程',
+        chapter: '章节',
+        note: '笔记',
+        bookmark: '书签',
+        screenshot: '截图',
+        review: '复习计划'
+      };
+
+      let currentIndex = 0;
+      let decisions = {};
+      let bulkAction = null;
+
+      const renderCurrent = () => {
+        if (currentIndex >= conflicts.length) {
+          this.closeModal();
+          resolve({ decisions, bulkAction });
+          return;
+        }
+
+        const conflict = conflicts[currentIndex];
+        const typeLabel = typeLabels[conflict.type] || conflict.type;
+        const existing = conflict.existing;
+        const incoming = conflict.incoming;
+
+        let existingInfo = '';
+        let incomingInfo = '';
+
+        if (conflict.type === 'course') {
+          existingInfo = `${existing.title}${existing.url ? ` (${existing.url})` : ''}`;
+          incomingInfo = `${incoming.title}${incoming.url ? ` (${incoming.url})` : ''}`;
+        } else if (conflict.type === 'note') {
+          existingInfo = `[${this.formatTime(existing.timestamp)}] ${existing.content?.substring(0, 50) || ''}`;
+          incomingInfo = `[${this.formatTime(incoming.timestamp)}] ${incoming.content?.substring(0, 50) || ''}`;
+        } else if (conflict.type === 'bookmark') {
+          existingInfo = `[${this.formatTime(existing.timestamp)}] ${existing.title}`;
+          incomingInfo = `[${this.formatTime(incoming.timestamp)}] ${incoming.title}`;
+        } else if (conflict.type === 'screenshot') {
+          existingInfo = `[${this.formatTime(existing.timestamp)}] ${existing.title}`;
+          incomingInfo = `[${this.formatTime(incoming.timestamp)}] ${incoming.title}`;
+        } else if (conflict.type === 'review') {
+          existingInfo = existing.title;
+          incomingInfo = incoming.title;
+        }
+
+        this.showModal(`
+          <div class="modal-header">
+            <h3>⚠️ 检测到重复 (${currentIndex + 1}/${conflicts.length})</h3>
+            <button class="modal-close" data-close>×</button>
+          </div>
+          <div class="modal-body">
+            <p style="font-size:13px;color:#6b7280;margin-bottom:12px;">
+              发现重复的 <strong>${typeLabel}</strong>，请选择处理方式：
+            </p>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:16px;">
+              <div style="padding:12px;background:#fef3c7;border:1px solid #fcd34d;border-radius:6px;">
+                <div style="font-size:12px;color:#92400e;margin-bottom:4px;">📌 现有数据</div>
+                <div style="font-size:13px;word-break:break-all;">${this.escapeHtml(existingInfo)}</div>
+              </div>
+              <div style="padding:12px;background:#dbeafe;border:1px solid #93c5fd;border-radius:6px;">
+                <div style="font-size:12px;color:#1e40af;margin-bottom:4px;">🆕 导入数据</div>
+                <div style="font-size:13px;word-break:break-all;">${this.escapeHtml(incomingInfo)}</div>
+              </div>
+            </div>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:12px;">
+              <button class="conflict-btn skip" data-action="skip">⏭️ 跳过此项</button>
+              <button class="conflict-btn overwrite" data-action="overwrite">♻️ 覆盖现有</button>
+              <button class="conflict-btn duplicate" data-action="duplicate">📋 保留副本</button>
+              <button class="conflict-btn merge" data-action="merge">🔗 合并内容</button>
+            </div>
+            <div style="padding:10px;background:#f9fafb;border:1px solid #e5e7eb;border-radius:6px;">
+              <div style="font-size:12px;color:#6b7280;margin-bottom:8px;">批量应用到剩余所有冲突：</div>
+              <div style="display:flex;gap:8px;flex-wrap:wrap;">
+                <button class="btn-secondary bulk-btn" data-bulk="skip" style="padding:6px 10px;font-size:12px;">全部跳过</button>
+                <button class="btn-secondary bulk-btn" data-bulk="overwrite" style="padding:6px 10px;font-size:12px;">全部覆盖</button>
+                <button class="btn-secondary bulk-btn" data-bulk="duplicate" style="padding:6px 10px;font-size:12px;">全部保留副本</button>
+                <button class="btn-secondary bulk-btn" data-bulk="merge" style="padding:6px 10px;font-size:12px;">全部合并</button>
+              </div>
+            </div>
+          </div>
+        `);
+
+        document.querySelectorAll('.conflict-btn').forEach(btn => {
+          btn.addEventListener('click', () => {
+            decisions[conflict.key] = btn.dataset.action;
+            currentIndex++;
+            renderCurrent();
+          });
+        });
+
+        document.querySelectorAll('.bulk-btn').forEach(btn => {
+          btn.addEventListener('click', () => {
+            bulkAction = btn.dataset.bulk;
+            for (let i = currentIndex; i < conflicts.length; i++) {
+              decisions[conflicts[i].key] = bulkAction;
+            }
+            this.closeModal();
+            resolve({ decisions, bulkAction });
+          });
+        });
+
+        this.bindCloseEvents();
+        const origClose = this.closeModal.bind(this);
+        this.closeModal = () => {
+          this.closeModal = origClose;
+          origClose();
+          resolve({ decisions, bulkAction: 'skip' });
+        };
+      };
+
+      renderCurrent();
+    });
+  },
+
+  async doImport() {
+    const file = this._importFile;
+    if (!file) {
+      this.showToast('请先选择文件');
+      return;
+    }
+
+    const progressEl = document.getElementById('importProgress');
+    progressEl.style.display = 'block';
+    progressEl.textContent = '正在解析文件...';
+
+    let parsedData = null;
+    let format = 'json';
+    let parseWarnings = [];
+    let parseErrors = 0;
+
+    try {
+      const text = await file.text();
+      const filename = file.name.toLowerCase();
+
+      if (filename.endsWith('.json') || (text.trim().startsWith('{') || text.trim().startsWith('['))) {
+        try {
+          parsedData = JSON.parse(text);
+          format = 'json';
+          if (!parsedData.courses || !Array.isArray(parsedData.courses)) {
+            throw new Error('JSON 格式不正确：缺少 courses 数组');
+          }
+        } catch (e) {
+          if (filename.endsWith('.md') || filename.endsWith('.markdown')) {
+            const mdResult = this.parseMarkdown(text);
+            parsedData = { courses: mdResult.courses };
+            format = 'markdown';
+            parseWarnings = mdResult.warnings;
+            parseErrors = mdResult.parseErrors;
+            progressEl.textContent = `Markdown 解析完成：${mdResult.parsedItems} 项，${parseErrors} 项失败`;
+          } else {
+            throw e;
+          }
+        }
+      } else if (filename.endsWith('.md') || filename.endsWith('.markdown')) {
+        const mdResult = this.parseMarkdown(text);
+        parsedData = { courses: mdResult.courses };
+        format = 'markdown';
+        parseWarnings = mdResult.warnings;
+        parseErrors = mdResult.parseErrors;
+        progressEl.textContent = `Markdown 解析完成：${mdResult.parsedItems} 项，${parseErrors} 项失败`;
+      } else {
+        throw new Error('不支持的文件格式，请选择 .json 或 .md 文件');
+      }
+
+      const conflictMode = document.getElementById('importConflictMode').value;
+      const stats = { courses: 0, notes: 0, bookmarks: 0, screenshots: 0, reviews: 0, skipped: 0, conflicts: 0, parseErrors };
+
+      const existingCoursesResp = await chrome.runtime.sendMessage({ action: 'getCourses' });
+      const existingCourses = existingCoursesResp?.data || [];
+      const notesResp = await chrome.runtime.sendMessage({ action: 'getNotes', filter: {} });
+      const bookmarksResp = await chrome.runtime.sendMessage({ action: 'getBookmarks', filter: {} });
+      const screenshotsResp = await chrome.runtime.sendMessage({ action: 'getScreenshots', filter: {} });
+      const reviewsResp = await chrome.runtime.sendMessage({ action: 'getReviews', filter: {} });
+      const existingNotes = notesResp?.data || [];
+      const existingBms = bookmarksResp?.data || [];
+      const existingSss = screenshotsResp?.data || [];
+      const existingReviews = reviewsResp?.data || [];
+
+      const conflicts = [];
+      const allItems = [];
+
+      for (const courseData of parsedData.courses) {
+        const courseMatch = existingCourses.find(c =>
+          (courseData.id && c.id === courseData.id) ||
+          (courseData.url && c.url === courseData.url) ||
+          (courseData.title && c.title === courseData.title)
+        );
+
+        if (courseMatch) {
+          conflicts.push({
+            type: 'course',
+            key: `course-${courseData.id || courseData.title}`,
+            existing: courseMatch,
+            incoming: courseData
+          });
+        }
+        allItems.push({ type: 'course', data: courseData, existing: courseMatch });
+
+        const chapterIdMap = {};
+        const existingCourse = courseMatch || { id: null, chapters: [] };
+        const importChapters = courseData.chapters || [];
+        for (const ch of importChapters) {
+          let existingCh = existingCourse.chapters?.find(c =>
+            c.title === ch.title || c.id === ch.id
+          );
+          chapterIdMap[ch.id] = existingCh?.id || null;
+          if (existingCh && courseMatch) {
+            conflicts.push({
+              type: 'chapter',
+              key: `chapter-${ch.id || ch.title}`,
+              existing: existingCh,
+              incoming: ch
+            });
+          }
+          allItems.push({ type: 'chapter', data: ch, existing: existingCh, courseMatch, chapterIdMap });
+        }
+
+        const notes = courseData.notes || [];
+        for (const note of notes) {
+          const targetCourseId = courseMatch?.id;
+          const mappedChapterId = note.chapterId ? (chapterIdMap[note.chapterId] || null) : null;
+          const dup = existingNotes.find(n =>
+            n.courseId === targetCourseId &&
+            Math.abs(n.timestamp - note.timestamp) < 0.5 &&
+            n.content === note.content
+          );
+          if (dup && courseMatch) {
+            conflicts.push({
+              type: 'note',
+              key: `note-${targetCourseId}-${note.timestamp}-${note.content}`,
+              existing: dup,
+              incoming: note
+            });
+          }
+          allItems.push({ type: 'note', data: note, existing: dup, courseMatch, chapterIdMap, mappedChapterId });
+        }
+
+        const bookmarks = courseData.bookmarks || [];
+        for (const bm of bookmarks) {
+          const targetCourseId = courseMatch?.id;
+          const mappedChapterId = bm.chapterId ? (chapterIdMap[bm.chapterId] || null) : null;
+          const dup = existingBms.find(b =>
+            b.courseId === targetCourseId &&
+            Math.abs(b.timestamp - bm.timestamp) < 0.5 &&
+            b.title === bm.title
+          );
+          if (dup && courseMatch) {
+            conflicts.push({
+              type: 'bookmark',
+              key: `bookmark-${targetCourseId}-${bm.timestamp}-${bm.title}`,
+              existing: dup,
+              incoming: bm
+            });
+          }
+          allItems.push({ type: 'bookmark', data: bm, existing: dup, courseMatch, chapterIdMap, mappedChapterId });
+        }
+
+        const screenshots = courseData.screenshots || [];
+        for (const ss of screenshots) {
+          const targetCourseId = courseMatch?.id;
+          const mappedChapterId = ss.chapterId ? (chapterIdMap[ss.chapterId] || null) : null;
+          const dup = existingSss.find(s =>
+            s.courseId === targetCourseId &&
+            Math.abs(s.timestamp - ss.timestamp) < 0.5 &&
+            s.title === ss.title
+          );
+          if (dup && courseMatch) {
+            conflicts.push({
+              type: 'screenshot',
+              key: `screenshot-${targetCourseId}-${ss.timestamp}-${ss.title}`,
+              existing: dup,
+              incoming: ss
+            });
+          }
+          allItems.push({ type: 'screenshot', data: ss, existing: dup, courseMatch, chapterIdMap, mappedChapterId });
+        }
+
+        const reviews = courseData.reviews || [];
+        for (const rv of reviews) {
+          const targetCourseId = courseMatch?.id;
+          const mappedChapterId = rv.chapterId ? (chapterIdMap[rv.chapterId] || null) : null;
+          const dup = existingReviews.find(r =>
+            r.courseId === targetCourseId &&
+            r.title === rv.title
+          );
+          if (dup && courseMatch) {
+            conflicts.push({
+              type: 'review',
+              key: `review-${targetCourseId}-${rv.title}`,
+              existing: dup,
+              incoming: rv
+            });
+          }
+          allItems.push({ type: 'review', data: rv, existing: dup, courseMatch, chapterIdMap, mappedChapterId });
+        }
+      }
+
+      stats.conflicts = conflicts.length;
+
+      let conflictDecisions = {};
+      if (conflictMode === 'ask' && conflicts.length > 0) {
+        progressEl.textContent = `检测到 ${conflicts.length} 个冲突，请处理...`;
+        const result = await this.showConflictDialog(conflicts);
+        conflictDecisions = result.decisions;
+        if (result.bulkAction) {
+          progressEl.textContent = `已选择批量处理：${result.bulkAction === 'skip' ? '全部跳过' : result.bulkAction === 'overwrite' ? '全部覆盖' : result.bulkAction === 'duplicate' ? '全部保留副本' : '全部合并'}`;
+        }
+      }
+
+      progressEl.textContent = '正在导入数据...';
+
+      const savedCourseIdMap = {};
+      const savedChapterIdMap = {};
+
+      for (const item of allItems) {
+        const { type, data, existing, courseMatch, chapterIdMap, mappedChapterId } = item;
+
+        let action = conflictMode;
+        if (existing && conflictMode === 'ask') {
+          const key = conflicts.find(c => c.existing === existing)?.key;
+          action = conflictDecisions[key] || 'skip';
+        }
+
+        if (type === 'course') {
+          if (existing) {
+            if (action === 'skip') {
+              stats.skipped++;
+              savedCourseIdMap[data.id || data.title] = existing.id;
+              continue;
+            } else if (action === 'overwrite') {
+              const courseToSave = { ...data, id: existing.id };
+              delete courseToSave.notes;
+              delete courseToSave.bookmarks;
+              delete courseToSave.screenshots;
+              delete courseToSave.reviews;
+              if (data.chapters) {
+                courseToSave.chapters = existing.chapters || [];
+                for (const ch of data.chapters) {
+                  if (!courseToSave.chapters.find(c => c.id === ch.id || c.title === ch.title)) {
+                    courseToSave.chapters.push({ ...ch, id: Date.now().toString(36) + Math.random().toString(36).slice(2, 6) });
+                  }
+                }
+              }
+              await chrome.runtime.sendMessage({ action: 'saveCourse', course: courseToSave });
+              savedCourseIdMap[data.id || data.title] = existing.id;
+              stats.courses++;
+            } else if (action === 'duplicate') {
+              const courseToSave = { ...data, id: undefined, title: data.title + ' (副本)' };
+              delete courseToSave.notes;
+              delete courseToSave.bookmarks;
+              delete courseToSave.screenshots;
+              delete courseToSave.reviews;
+              if (courseToSave.chapters) {
+                courseToSave.chapters = courseToSave.chapters.map(ch => ({
+                  ...ch,
+                  id: Date.now().toString(36) + Math.random().toString(36).slice(2, 6)
+                }));
+              }
+              const saved = await chrome.runtime.sendMessage({ action: 'saveCourse', course: courseToSave });
+              savedCourseIdMap[data.id || data.title] = saved?.data?.id;
+              stats.courses++;
+            } else if (action === 'merge') {
+              const merged = { ...existing };
+              if (data.url && !merged.url) merged.url = data.url;
+              if (data.chapters) {
+                merged.chapters = existing.chapters || [];
+                for (const ch of data.chapters) {
+                  if (!merged.chapters.find(c => c.id === ch.id || c.title === ch.title)) {
+                    merged.chapters.push({ ...ch, id: Date.now().toString(36) + Math.random().toString(36).slice(2, 6) });
+                  }
+                }
+              }
+              await chrome.runtime.sendMessage({ action: 'saveCourse', course: merged });
+              savedCourseIdMap[data.id || data.title] = existing.id;
+              stats.courses++;
+            }
+          } else {
+            const courseToSave = { ...data };
+            delete courseToSave.notes;
+            delete courseToSave.bookmarks;
+            delete courseToSave.screenshots;
+            delete courseToSave.reviews;
+            if (!courseToSave.chapters) courseToSave.chapters = [];
+            courseToSave.chapters = courseToSave.chapters.map(ch => ({
+              ...ch,
+              id: ch.id || Date.now().toString(36) + Math.random().toString(36).slice(2, 6)
+            }));
+            const saved = await chrome.runtime.sendMessage({ action: 'saveCourse', course: courseToSave });
+            savedCourseIdMap[data.id || data.title] = saved?.data?.id;
+            stats.courses++;
+          }
+        } else if (type === 'chapter') {
+          continue;
+        } else {
+          const targetCourseId = savedCourseIdMap[data.courseId || courseMatch?.id || ''];
+          if (!targetCourseId) continue;
+
+          const savedChaptersResp = await chrome.runtime.sendMessage({ action: 'getCourses' });
+          const savedCourses = savedChaptersResp?.data || [];
+          const targetCourse = savedCourses.find(c => c.id === targetCourseId);
+          const targetChapterId = mappedChapterId || (data.chapterId ? (chapterIdMap[data.chapterId] || null) : null);
+
+          const newItem = { ...data };
+          if (existing && (action === 'skip' || conflictMode === 'skip')) {
+            stats.skipped++;
+            continue;
+          }
+
+          if (existing && action === 'overwrite') {
+            newItem.id = existing.id;
+          } else if (existing && action === 'merge') {
+            if (type === 'note') {
+              newItem.content = existing.content + '\n' + newItem.content;
+            } else if (type === 'bookmark' || type === 'screenshot') {
+              newItem.description = (existing.description || '') + '\n' + (newItem.description || '');
+            }
+            newItem.id = existing.id;
+          } else if (existing && action === 'duplicate') {
+            delete newItem.id;
+            if (newItem.title) newItem.title += ' (副本)';
+          } else {
+            delete newItem.id;
+          }
+
+          newItem.courseId = targetCourseId;
+          newItem.chapterId = targetChapterId;
+          if (!newItem.createdAt) newItem.createdAt = Date.now();
+
+          const actionMap = {
+            note: { save: 'saveNote', field: 'notes' },
+            bookmark: { save: 'saveBookmark', field: 'bookmarks' },
+            screenshot: { save: 'saveScreenshot', field: 'screenshots' },
+            review: { save: 'saveReview', field: 'reviews' }
+          };
+
+          const { save, field } = actionMap[type] || {};
+          if (save) {
+            if (type === 'screenshot' && !newItem.imageData && !newItem.annotatedData) {
+              newItem.imageData = '';
+              newItem.annotatedData = '';
+            }
+            await chrome.runtime.sendMessage({ action: save, [type === 'note' ? 'note' : type === 'bookmark' ? 'bookmark' : type === 'screenshot' ? 'screenshot' : 'review']: newItem });
+            stats[field]++;
+          }
+        }
+      }
+
+      if (parseWarnings.length > 0) {
+        progressEl.innerHTML = `✅ 导入完成！${stats.courses}门课程 / ${stats.notes}条笔记 / ${stats.bookmarks}个书签 / ${stats.screenshots}张截图 / ${stats.reviews}条复习计划 / 跳过${stats.skipped}项<br/>
+          <span style="color:#f59e0b;font-size:12px;">⚠️ ${parseWarnings.length} 条提示：${parseWarnings[0]}${parseWarnings.length > 1 ? `...还有 ${parseWarnings.length - 1} 条` : ''}</span>`;
+      } else {
+        progressEl.textContent = `✅ 导入完成！${stats.courses}门课程 / ${stats.notes}条笔记 / ${stats.bookmarks}个书签 / ${stats.screenshots}张截图 / ${stats.reviews}条复习计划 / 跳过${stats.skipped}项`;
+      }
+      this.showToast('导入完成');
+
+      await this.loadCourses();
+      this.populateExportCourseSelect();
+      this.renderCurrentTab();
+      if (this.reviewView === 'week') this.renderWeekView();
+      if (this.reviewView === 'month') this.renderMonthView();
+
+      setTimeout(() => progressEl.style.display = 'none', 8000);
+      this._importFile = null;
+      document.getElementById('importFileInput').value = '';
+
+      await this.addHistoryEntry({
+        type: 'import',
+        format,
+        filename: file.name,
+        courses: stats.courses,
+        notes: stats.notes,
+        bookmarks: stats.bookmarks,
+        screenshots: stats.screenshots,
+        reviews: stats.reviews,
+        skipped: stats.skipped,
+        conflicts: stats.conflicts,
+        parseErrors: stats.parseErrors,
+        success: true
+      });
+
+    } catch (e) {
+      console.error(e);
+      progressEl.textContent = '❌ 导入失败：' + e.message;
+      this.showToast('导入失败: ' + e.message);
+      setTimeout(() => progressEl.style.display = 'none', 4000);
+
+      await this.addHistoryEntry({
+        type: 'import',
+        format: file.name.toLowerCase().endsWith('.md') ? 'markdown' : 'json',
+        filename: file.name,
+        error: e.message,
+        success: false
+      });
+    }
+  },
+
+  async renderMonthView() {
+    const container = document.getElementById('monthViewContainer');
+    if (!container) return;
+
+    const resp = await chrome.runtime.sendMessage({ action: 'getReviews', filter: {} });
+    let reviews = resp?.data || [];
+
+    if (this.reviewFilter === 'overview') {
+      const startOfToday = new Date(); startOfToday.setHours(0, 0, 0, 0);
+      const endOfToday = new Date(); endOfToday.setHours(23, 59, 59, 999);
+      reviews = reviews.filter(r =>
+        r.status !== 'mastered' &&
+        r.nextReviewAt &&
+        r.nextReviewAt <= endOfToday.getTime()
+      );
+    } else if (this.currentCourseId) {
+      reviews = reviews.filter(r => r.courseId === this.currentCourseId);
+    }
+
+    const year = this._monthDate.getFullYear();
+    const month = this._monthDate.getMonth();
+    const firstDay = new Date(year, month, 1);
+    const lastDay = new Date(year, month + 1, 0);
+    const startOfMonth = new Date(year, month, 1).getTime();
+    const endOfMonth = new Date(year, month + 1, 0, 23, 59, 59, 999).getTime();
+    const today = new Date(); today.setHours(0, 0, 0, 0);
+    const todayTime = today.getTime();
+
+    const startOfWeek = firstDay.getDay();
+    const totalDays = lastDay.getDate();
+
+    const dayStats = {};
+    for (let d = 1; d <= totalDays; d++) {
+      const date = new Date(year, month, d);
+      date.setHours(0, 0, 0, 0);
+      dayStats[d] = {
+        date,
+        timestamp: date.getTime(),
+        planned: 0,
+        completed: 0,
+        overdue: 0,
+        items: []
+      };
+    }
+
+    for (const r of reviews) {
+      if (r.nextReviewAt) {
+        const reviewDate = new Date(r.nextReviewAt);
+        reviewDate.setHours(0, 0, 0, 0);
+        const dayKey = reviewDate.getDate();
+        if (reviewDate.getMonth() === month && reviewDate.getFullYear() === year && dayStats[dayKey]) {
+          dayStats[dayKey].items.push(r);
+          dayStats[dayKey].planned++;
+          if (r.status === 'mastered') {
+            dayStats[dayKey].completed++;
+          } else if (dayStats[dayKey].timestamp < todayTime) {
+            dayStats[dayKey].overdue++;
+          }
+        }
+      }
+    }
+
+    const monthStats = {
+      totalPlanned: 0,
+      totalCompleted: 0,
+      totalOverdue: 0,
+      daysWithTasks: 0,
+      completionRate: 0
+    };
+
+    for (const d of Object.keys(dayStats)) {
+      const ds = dayStats[d];
+      monthStats.totalPlanned += ds.planned;
+      monthStats.totalCompleted += ds.completed;
+      monthStats.totalOverdue += ds.overdue;
+      if (ds.planned > 0) monthStats.daysWithTasks++;
+    }
+    if (monthStats.totalPlanned > 0) {
+      monthStats.completionRate = Math.round((monthStats.totalCompleted / monthStats.totalPlanned) * 100);
+    }
+
+    const monthNames = ['1月', '2月', '3月', '4月', '5月', '6月', '7月', '8月', '9月', '10月', '11月', '12月'];
+    const weekdayNames = ['日', '一', '二', '三', '四', '五', '六'];
+
+    let html = `
+      <div class="month-header">
+        <button class="month-nav-btn" id="prevMonthBtn">‹</button>
+        <div class="month-title">${year}年 ${monthNames[month]}</div>
+        <button class="month-nav-btn" id="nextMonthBtn">›</button>
+      </div>
+
+      <div class="month-stats">
+        <div class="month-stat-card">
+          <div class="stat-value">${monthStats.totalPlanned}</div>
+          <div class="stat-label">本月计划</div>
+        </div>
+        <div class="month-stat-card completed">
+          <div class="stat-value">${monthStats.totalCompleted}</div>
+          <div class="stat-label">已完成</div>
+        </div>
+        <div class="month-stat-card overdue">
+          <div class="stat-value">${monthStats.totalOverdue}</div>
+          <div class="stat-label">已过期</div>
+        </div>
+        <div class="month-stat-card rate">
+          <div class="stat-value">${monthStats.completionRate}%</div>
+          <div class="stat-label">完成率</div>
+        </div>
+      </div>
+
+      <div class="month-calendar">
+        <div class="month-weekdays">
+          ${weekdayNames.map(name => `<div class="weekday-name ${name === '日' || name === '六' ? 'weekend' : ''}">${name}</div>`).join('')}
+        </div>
+        <div class="month-days">
+    `;
+
+    for (let i = 0; i < startOfWeek; i++) {
+      html += '<div class="month-day empty"></div>';
+    }
+
+    for (let day = 1; day <= totalDays; day++) {
+      const ds = dayStats[day];
+      const isToday = ds.timestamp === todayTime;
+      const isSelected = this._selectedDay && this._selectedDay.getTime() === ds.timestamp;
+      const isPast = ds.timestamp < todayTime;
+      const isFuture = ds.timestamp > todayTime;
+
+      let statusClass = '';
+      if (ds.overdue > 0) statusClass = 'has-overdue';
+      else if (ds.completed === ds.planned && ds.planned > 0) statusClass = 'all-completed';
+      else if (ds.planned > 0) statusClass = 'has-tasks';
+
+      html += `
+        <div class="month-day ${statusClass} ${isToday ? 'today' : ''} ${isSelected ? 'selected' : ''} ${isPast ? 'past' : ''} ${isFuture ? 'future' : ''}" 
+             data-day="${day}" data-timestamp="${ds.timestamp}">
+          <div class="day-number">${day}</div>
+          ${ds.planned > 0 ? `
+            <div class="day-dots">
+              ${ds.overdue > 0 ? '<span class="day-dot overdue"></span>' : ''}
+              ${ds.completed > 0 ? '<span class="day-dot completed"></span>' : ''}
+              ${ds.planned - ds.completed - ds.overdue > 0 ? '<span class="day-dot pending"></span>' : ''}
+            </div>
+            <div class="day-badge">${ds.planned}</div>
+          ` : ''}
+        </div>
+      `;
+    }
+
+    const remainingCells = 42 - (startOfWeek + totalDays);
+    for (let i = 0; i < remainingCells; i++) {
+      html += '<div class="month-day empty"></div>';
+    }
+
+    html += `
+        </div>
+      </div>
+    `;
+
+    if (this._selectedDay) {
+      const dayKey = this._selectedDay.getDate();
+      const selectedData = dayStats[dayKey];
+      if (selectedData && selectedData.items.length > 0) {
+        html += `
+          <div class="day-task-list">
+            <div class="day-task-header">
+              <span>📅 ${this._selectedDay.toLocaleDateString()} 的复习任务 (${selectedData.items.length})</span>
+              <button class="btn-secondary" id="clearDaySelection" style="padding:4px 10px;font-size:12px;">清除选择</button>
+            </div>
+            <div class="day-task-items">
+              ${selectedData.items.map(r => {
+                const course = this.courses.find(c => c.id === r.courseId);
+                const statusClass = r.status === 'mastered' ? 'review-mastered' : (r.nextReviewAt < todayTime ? 'review-overdue' : 'review-pending');
+                const statusText = r.status === 'mastered' ? '已完成' : (r.nextReviewAt < todayTime ? '已过期' : '待复习');
+                return `
+                  <div class="day-task-item">
+                    <div class="task-main">
+                      <div class="task-title">${this.escapeHtml(r.title)}</div>
+                      <div class="task-meta">
+                        ${course ? `<span class="tag">${this.escapeHtml(course.title)}</span>` : ''}
+                        ${r.timestamp != null ? `<span class="tag time-tag" data-action="jump" data-time="${r.timestamp}" data-course="${r.courseId}">📍 ${this.formatTime(r.timestamp)}</span>` : ''}
+                      </div>
+                    </div>
+                    <span class="review-status ${statusClass}">${statusText}</span>
+                  </div>
+                `;
+              }).join('')}
+            </div>
+          </div>
+        `;
+      } else if (selectedData) {
+        html += `
+          <div class="day-task-list">
+            <div class="day-task-header">
+              <span>📅 ${this._selectedDay.toLocaleDateString()}</span>
+              <button class="btn-secondary" id="clearDaySelection" style="padding:4px 10px;font-size:12px;">清除选择</button>
+            </div>
+            <div style="padding:20px;text-align:center;color:#9ca3af;">
+              今天没有复习任务 🎉
+            </div>
+          </div>
+        `;
+      }
+    }
+
+    container.innerHTML = html;
+
+    document.getElementById('prevMonthBtn')?.addEventListener('click', () => {
+      this._monthDate = new Date(year, month - 1, 1);
+      this._selectedDay = null;
+      this.renderMonthView();
+    });
+
+    document.getElementById('nextMonthBtn')?.addEventListener('click', () => {
+      this._monthDate = new Date(year, month + 1, 1);
+      this._selectedDay = null;
+      this.renderMonthView();
+    });
+
+    document.getElementById('clearDaySelection')?.addEventListener('click', () => {
+      this._selectedDay = null;
+      this.renderMonthView();
+    });
+
+    container.querySelectorAll('.month-day[data-day]').forEach(dayEl => {
+      dayEl.addEventListener('click', () => {
+        const timestamp = parseInt(dayEl.dataset.timestamp);
+        this._selectedDay = new Date(timestamp);
+        this.renderMonthView();
+      });
+    });
+
+    container.querySelectorAll('[data-action="jump"]').forEach(btn => {
+      btn.addEventListener('click', async (e) => {
+        e.stopPropagation();
+        await this.jumpToTimestampForCourse(e.currentTarget.dataset.course, parseFloat(e.currentTarget.dataset.time));
+      });
+    });
   }
 };
 
