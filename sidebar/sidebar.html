@@ -1,0 +1,184 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>网课学习笔记助手</title>
+  <link rel="stylesheet" href="sidebar.css">
+</head>
+<body>
+  <div class="sidebar-app">
+    <div class="sidebar-header">
+      <div class="header-title">
+        <span class="header-icon">📝</span>
+        <span>学习笔记</span>
+      </div>
+      <div class="header-actions">
+        <button class="icon-btn" id="btnSync" title="同步">🔄</button>
+      </div>
+    </div>
+
+    <div class="course-selector">
+      <div class="course-selector-header">
+        <select id="courseSelect" class="course-select">
+          <option value="">加载中...</option>
+        </select>
+        <button class="icon-btn" id="btnAddCourse" title="新建课程">➕</button>
+      </div>
+      <div class="chapter-selector">
+        <select id="chapterSelect" class="chapter-select">
+          <option value="">选择章节</option>
+        </select>
+        <button class="icon-btn" id="btnAddChapter" title="新建章节">➕</button>
+      </div>
+    </div>
+
+    <div class="tabs">
+      <button class="tab-btn active" data-tab="notes">📝 笔记</button>
+      <button class="tab-btn" data-tab="bookmarks">🔖 书签</button>
+      <button class="tab-btn" data-tab="screenshots">📷 截图</button>
+      <button class="tab-btn" data-tab="reviews">🔁 复习</button>
+      <button class="tab-btn" data-tab="settings">⚙️ 设置</button>
+    </div>
+
+    <div class="tab-content">
+      <div class="tab-pane active" id="tab-notes">
+        <div class="list-header">
+          <input type="text" class="search-input" id="searchNotes" placeholder="搜索笔记..." />
+        </div>
+        <div class="list-container" id="notesList">
+          <div class="empty-state">
+            <div class="empty-icon">📝</div>
+            <p>还没有笔记</p>
+            <p class="empty-hint">使用 Ctrl+Shift+N 快速记录</p>
+          </div>
+        </div>
+      </div>
+
+      <div class="tab-pane" id="tab-bookmarks">
+        <div class="list-header">
+          <input type="text" class="search-input" id="searchBookmarks" placeholder="搜索书签..." />
+          <input type="text" class="search-input" id="filterBookmarkTag" placeholder="按标签筛选" />
+        </div>
+        <div class="list-container" id="bookmarksList">
+          <div class="empty-state">
+            <div class="empty-icon">🔖</div>
+            <p>还没有书签</p>
+            <p class="empty-hint">使用 Ctrl+Shift+B 快速添加</p>
+          </div>
+        </div>
+      </div>
+
+      <div class="tab-pane" id="tab-screenshots">
+        <div class="list-header">
+          <input type="text" class="search-input" id="searchScreenshots" placeholder="搜索截图..." />
+        </div>
+        <div class="screenshots-grid" id="screenshotsGrid">
+          <div class="empty-state">
+            <div class="empty-icon">📷</div>
+            <p>还没有截图</p>
+            <p class="empty-hint">使用 Ctrl+Shift+S 截取画面</p>
+          </div>
+        </div>
+      </div>
+
+      <div class="tab-pane" id="tab-reviews">
+        <div class="list-header">
+          <div class="filter-tabs">
+            <button class="filter-btn active" data-filter="all">全部</button>
+            <button class="filter-btn" data-filter="pending">待复习</button>
+            <button class="filter-btn" data-filter="mastered">已掌握</button>
+          </div>
+          <button class="btn-primary btn-sm" id="btnAddReview">➕ 添加</button>
+        </div>
+        <div class="list-container" id="reviewsList">
+          <div class="empty-state">
+            <div class="empty-icon">🔁</div>
+            <p>还没有复习计划</p>
+            <p class="empty-hint">添加需要复习的内容</p>
+          </div>
+        </div>
+      </div>
+
+      <div class="tab-pane" id="tab-settings">
+        <div class="settings-section">
+          <h3 class="settings-title">⚙️ 通用设置</h3>
+          <div class="setting-item">
+            <label class="setting-label">
+              <span>显示浮动窗口</span>
+              <small>页面右下角的快捷操作面板</small>
+            </label>
+            <label class="switch">
+              <input type="checkbox" id="settingFloatWindow" checked />
+              <span class="slider"></span>
+            </label>
+          </div>
+          <div class="setting-item">
+            <label class="setting-label">
+              <span>自动检测视频</span>
+              <small>进入页面时自动查找视频元素</small>
+            </label>
+            <label class="switch">
+              <input type="checkbox" id="settingAutoDetect" checked />
+              <span class="slider"></span>
+            </label>
+          </div>
+          <div class="setting-item">
+            <label class="setting-label">
+              <span>复习提醒天数</span>
+              <small>间隔多少天后提醒复习</small>
+            </label>
+            <input type="number" id="settingReminderDays" class="setting-input" min="1" max="30" value="7" />
+          </div>
+        </div>
+
+        <div class="settings-section">
+          <h3 class="settings-title">⌨️ 快捷键</h3>
+          <div class="setting-item">
+            <span class="setting-label">快速笔记</span>
+            <kbd class="key-badge">Ctrl+Shift+N</kbd>
+          </div>
+          <div class="setting-item">
+            <span class="setting-label">添加书签</span>
+            <kbd class="key-badge">Ctrl+Shift+B</kbd>
+          </div>
+          <div class="setting-item">
+            <span class="setting-label">截取画面</span>
+            <kbd class="key-badge">Ctrl+Shift+S</kbd>
+          </div>
+          <div class="setting-item">
+            <span class="setting-label">切换侧边栏</span>
+            <kbd class="key-badge">Ctrl+Shift+P</kbd>
+          </div>
+          <p class="settings-hint">💡 快捷键可在 chrome://extensions/shortcuts 中自定义</p>
+        </div>
+
+        <div class="settings-section">
+          <h3 class="settings-title">📦 数据管理</h3>
+          <div class="settings-actions">
+            <button class="btn-secondary" id="btnExportAll">导出全部数据 (JSON)</button>
+            <button class="btn-secondary" id="btnExportNotes">导出笔记 (Markdown)</button>
+            <button class="btn-danger" id="btnCleanCourses">清理无效课程</button>
+            <button class="btn-danger-outline" id="btnClearAll">清空所有数据</button>
+          </div>
+        </div>
+
+        <div class="settings-section">
+          <h3 class="settings-title">ℹ️ 关于</h3>
+          <div class="about-info">
+            <p><strong>网课学习笔记助手</strong> v1.0.0</p>
+            <p>帮助你高效整理视频学习重点</p>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="modal-overlay" id="modalOverlay" style="display:none;">
+      <div class="modal" id="modalContent"></div>
+    </div>
+  </div>
+
+  <script src="../lib/storage.js"></script>
+  <script src="sidebar.js"></script>
+</body>
+</html>

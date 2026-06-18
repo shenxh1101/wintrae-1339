@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>网课学习笔记助手</title>
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <div class="popup-container">
+    <div class="popup-header">
+      <div class="popup-logo">📝</div>
+      <div class="popup-title">
+        <h1>网课学习笔记</h1>
+        <p>高效整理你的学习重点</p>
+      </div>
+    </div>
+
+    <div class="popup-stats" id="popupStats">
+      <div class="stat-item">
+        <span class="stat-number" id="statCourses">0</span>
+        <span class="stat-label">课程</span>
+      </div>
+      <div class="stat-item">
+        <span class="stat-number" id="statNotes">0</span>
+        <span class="stat-label">笔记</span>
+      </div>
+      <div class="stat-item">
+        <span class="stat-number" id="statBookmarks">0</span>
+        <span class="stat-label">书签</span>
+      </div>
+      <div class="stat-item">
+        <span class="stat-number" id="statReviews">0</span>
+        <span class="stat-label">待复习</span>
+      </div>
+    </div>
+
+    <div class="popup-actions">
+      <button class="action-btn action-primary" id="btnOpenSidebar">
+        <span class="action-icon">📋</span>
+        <span>打开侧边栏</span>
+      </button>
+    </div>
+
+    <div class="popup-shortcuts">
+      <h3>⌨️ 快捷键</h3>
+      <ul class="shortcut-list">
+        <li><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>N</kbd> 快速笔记</li>
+        <li><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>B</kbd> 添加书签</li>
+        <li><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>S</kbd> 截取画面</li>
+        <li><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>P</kbd> 侧边栏</li>
+      </ul>
+    </div>
+
+    <div class="popup-footer">
+      <span>v1.0.0</span>
+      <a href="#" id="btnSettings">⚙️ 设置</a>
+    </div>
+  </div>
+
+  <script src="popup.js"></script>
+</body>
+</html>
